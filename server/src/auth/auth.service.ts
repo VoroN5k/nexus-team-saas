@@ -3,7 +3,7 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import { JwtService } from '@nestjs/jwt';
 import { RegisterDto } from './dto/register.dto';
 import { SessionMeta } from './interfaces/session-meta.interface';
-import * as bcrypt from 'bcrypt';
+import * as argon2 from 'argon2';
 import { generateToken, hashToken } from './utils/token.util';
 import { EmailService } from './email/email.service';
 import { LoginDto } from './dto/login.dto';
@@ -40,7 +40,7 @@ export class AuthService {
 
             if (existing) throw new ConflictException("Email or username already in use");
 
-            const hashedPassword = await bcrypt.hash(password, 10);
+            const hashedPassword = await argon2.hash(password);
             const verifyToken = generateToken();
 
             const user = await tx.user.create({
@@ -65,7 +65,7 @@ export class AuthService {
             where: { email: dto.email }
         });
 
-        if (!user || !(await bcrypt.cmpare(dto.password, user.password))) {
+        if (!user || !(await argon2.verify(user.password, dto.password))) {
             throw new UnauthorizedException("Invalid credentials");
         }
 
