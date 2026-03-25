@@ -30,17 +30,17 @@ export class AuthService {
 
         return this.prisma.$transaction(async (tx) => {
             const existing = await tx.user.findFirst({
-                where: {
-                    OR: [
-                        { email },
-                        { firstName, lastName }
-                    ]
-                }
+                where: { email }
             })
 
             if (existing) throw new ConflictException("Email or username already in use");
 
-            const hashedPassword = await argon2.hash(password);
+            const hashedPassword = await argon2.hash(password, {
+                type: argon2.argon2id,
+                memoryCost: 65536,
+                timeCost: 3,
+                parallelism: 4,
+            });
             const verifyToken = generateToken();
 
             const user = await tx.user.create({
@@ -69,9 +69,9 @@ export class AuthService {
             throw new UnauthorizedException("Invalid credentials");
         }
 
-        if (!user.isEmailVerified) {
-            throw new UnauthorizedException("Email not verified");
-        }
+        //if (!user.isEmailVerified) {
+        //    throw new UnauthorizedException("Email not verified");
+        //}
 
         return this.issueTokens(user.id, meta, this.prisma);
     }
@@ -193,6 +193,8 @@ export class AuthService {
             rawRefreshToken: generateToken(),
         };
     }
+
+
 }
 
 // Utility

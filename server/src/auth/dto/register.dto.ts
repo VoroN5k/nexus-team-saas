@@ -24,6 +24,11 @@ export class RegisterDto {
     @MaxLength(20)
     lastName: string;
 
+    @IsString()
+    @MinLength(3)
+    @MaxLength(50)
+    organizationName: string;
+
     @IsOptional()
     @IsObject()
     meta?: {
