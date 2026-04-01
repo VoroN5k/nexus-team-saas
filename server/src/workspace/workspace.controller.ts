@@ -19,7 +19,7 @@ import { RequireRoles } from './decorators/require-roles.decorator';
 import { WorkspaceRole } from './decorators/workspace-role.decorator';
 import { CurrentUser } from 'src/auth/decorators/current-user.decorator';
 import { JWTPayload } from 'src/auth/interfaces/jwt-payload.interface';
-import { Role } from '../../generated/prisma';
+import { Role } from '../prisma/prisma.types';
 
 @UseGuards(JwtAuthGuard)
 @Controller('workspaces')
