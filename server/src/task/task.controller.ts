@@ -17,7 +17,7 @@ import { WorkspaceMemberGuard } from 'src/workspace/guards/workspace-member.guar
 import { CurrentUser } from 'src/auth/decorators/current-user.decorator';
 import { WorkspaceRole } from 'src/workspace/decorators/workspace-role.decorator';
 import { JWTPayload } from 'src/auth/interfaces/jwt-payload.interface';
-import { Role } from '../../generated/prisma';
+import { Role } from '../../generated/prisma/client';
 
 /**
  * Routes: /workspaces/:workspaceId/tasks

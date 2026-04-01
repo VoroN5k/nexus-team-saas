@@ -8,7 +8,7 @@ import {
 import { PrismaService } from 'src/prisma/prisma.service';
 import { CreateWorkspaceDto } from './dto/create-workspace.dto';
 import { InviteMemberDto, UpdateMemberRoleDto, UpdateWorkspaceDto } from './dto/workspace.dto';
-import { Role } from '../../generated/prisma/enums';
+import { Role } from '../../generated/prisma/client';
 
 @Injectable()
 export class WorkspaceService {
@@ -112,7 +112,7 @@ export class WorkspaceService {
   /**
    * Add or invite an existing user to the workspace.
    * In a real system this would send an invite email and await acceptance.
-   * For now it directly creates the membership (useful for dev/demo).
+   * For now it directly creates the membership
    */
   async addMember(workspaceId: string, dto: InviteMemberDto) {
     const targetUser = await this.prisma.user.findUnique({

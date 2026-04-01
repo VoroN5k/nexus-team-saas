@@ -15,7 +15,7 @@ import { SessionMeta } from './interfaces/session-meta.interface';
 import { JWTPayload } from './interfaces/jwt-payload.interface';
 import { generateToken, hashToken } from './utils/token.util';
 import * as argon2 from 'argon2';
-import { Role } from '../../generated/prisma/enums';
+import { Role } from '../../generated/prisma/client';
 
 @Injectable()
 export class AuthService {

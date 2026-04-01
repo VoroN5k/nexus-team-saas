@@ -7,7 +7,7 @@ import {
 import { PrismaService } from 'src/prisma/prisma.service';
 import { CreateTaskDto } from './dto/task.dto';
 import { UpdateTaskDto } from './dto/task.dto';
-import { Role } from '../../generated/prisma';
+import { Role } from '../../generated/prisma/client';
 
 @Injectable()
 export class TaskService {
