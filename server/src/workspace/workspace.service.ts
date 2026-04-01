@@ -8,6 +8,7 @@ import {
 import { PrismaService } from 'src/prisma/prisma.service';
 import { CreateWorkspaceDto } from './dto/create-workspace.dto';
 import { InviteMemberDto, UpdateMemberRoleDto, UpdateWorkspaceDto } from './dto/workspace.dto';
+import { Role } from '../../generated/prisma/enums';
 
 @Injectable()
 export class WorkspaceService {
