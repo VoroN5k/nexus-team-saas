@@ -2,6 +2,7 @@ import { ConflictException, Injectable, InternalServerErrorException } from "@ne
 import { PrismaService } from "src/prisma/prisma.service";
 import { CreateWorkspaceDto } from "./dto/create-workspace.dto";
 
+
 @Injectable()
 export class WorkspaceService {
     constructor(private readonly prisma: PrismaService) {}
