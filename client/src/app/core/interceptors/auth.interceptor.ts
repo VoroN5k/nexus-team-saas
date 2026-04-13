@@ -1,39 +1,32 @@
-import { Injectable } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
+import { HttpInterceptorFn, HttpErrorResponse } from '@angular/common/http';
+import { inject } from '@angular/core';
+import { AuthService } from '../services/auth.service';
+import { catchError, switchMap, throwError } from 'rxjs';
 
-const API = (wid: string) => `http://localhost:4000/api/workspaces/${wid}/tasks`;
+export const authInterceptor: HttpInterceptorFn = (req, next) => {
+  const auth = inject(AuthService);
+  const token = auth.token();
 
-export type TaskStatus = 'TODO' | 'IN_PROGRESS' | 'REVIEW' | 'DONE';
+  const authReq = token
+    ? req.clone({ setHeaders: { Authorization: `Bearer ${token}` } })
+    : req;
 
-export interface Task {
-  id: string;
-  title: string;
-  description?: string;
-  status: TaskStatus;
-  workspaceId: string;
-  assignedId?: string;
-  createdAt: string;
-  updatedAt: string;
-  assigned?: { id: string; firstName: string; lastName: string; email: string } | null;
-}
-
-@Injectable({ providedIn: 'root' })
-export class TaskService {
-  constructor(private http: HttpClient) {}
-
-  getAll(workspaceId: string) {
-    return this.http.get<Task[]>(API(workspaceId));
-  }
-
-  create(workspaceId: string, body: { title: string; description?: string; status?: TaskStatus; assignedId?: string }) {
-    return this.http.post<Task>(API(workspaceId), body);
-  }
-
-  update(workspaceId: string, taskId: string, body: Partial<{ title: string; description: string; status: TaskStatus; assignedId: string | null }>) {
-    return this.http.patch<Task>(`${API(workspaceId)}/${taskId}`, body);
-  }
-
-  delete(workspaceId: string, taskId: string) {
-    return this.http.delete(`${API(workspaceId)}/${taskId}`);
-  }
-}
+  return next(authReq).pipe(
+    catchError((err: HttpErrorResponse) => {
+      // On 401, attempt one token refresh then retry
+      if (err.status === 401 && !req.url.includes('/refresh') && !req.url.includes('/login')) {
+        return auth.refresh().pipe(
+          switchMap(r => {
+            const retried = req.clone({ setHeaders: { Authorization: `Bearer ${r.accessToken}` } });
+            return next(retried);
+          }),
+          catchError(refreshErr => {
+            auth.clearToken();
+            return throwError(() => refreshErr);
+          })
+        );
+      }
+      return throwError(() => err);
+    })
+  );
+};
