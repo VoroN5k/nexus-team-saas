@@ -1,0 +1,61 @@
+import { Injectable } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
+
+const API = 'http://localhost:4000/api/workspaces';
+
+export interface Workspace {
+  id: string;
+  name: string;
+  slug: string;
+  createdAt: string;
+  myRole: 'OWNER' | 'ADMIN' | 'MEMBER';
+  _count: { members: number; tasks: number };
+}
+
+export interface Member {
+  id: string;
+  role: string;
+  joinedAt: string;
+  user: { id: string; email: string; firstName: string; lastName: string };
+}
+
+@Injectable({ providedIn: 'root' })
+export class WorkspaceService {
+  constructor(private http: HttpClient) {}
+
+  getAll() {
+    return this.http.get<Workspace[]>(API);
+  }
+
+  getOne(id: string) {
+    return this.http.get<Workspace>(`${API}/${id}`);
+  }
+
+  create(name: string, slug: string) {
+    return this.http.post<Workspace>(API, { name, slug });
+  }
+
+  update(id: string, name: string) {
+    return this.http.patch<Workspace>(`${API}/${id}`, { name });
+  }
+
+  delete(id: string) {
+    return this.http.delete(`${API}/${id}`);
+  }
+
+  getMembers(workspaceId: string) {
+    return this.http.get<Member[]>(`${API}/${workspaceId}/members`);
+  }
+
+  addMember(workspaceId: string, email: string, role = 'MEMBER') {
+    return this.http.post<Member>(`${API}/${workspaceId}/members`, { email, role });
+  }
+
+  removeMember(workspaceId: string, userId: string) {
+    return this.http.delete(`${API}/${workspaceId}/members/${userId}`);
+  }
+
+  updateMemberRole(workspaceId: string, userId: string, role: string) {
+    return this.http.patch(`${API}/${workspaceId}/members/${userId}`, { role });
+  }
+}
