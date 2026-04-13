@@ -161,12 +161,12 @@ import { WorkspaceService, Workspace } from '../../core/services/workspace.servi
   `,
 })
 export class DashboardComponent implements OnInit {
-  // Use inject() so class-field initializers can reference services safely
+
   private auth             = inject(AuthService);
   private workspaceService = inject(WorkspaceService);
   private router           = inject(Router);
 
-  // Now this is safe — auth is already set when the field initializer runs
+
   readonly user = this.auth.user;
 
   workspaces  = signal<Workspace[]>([]);

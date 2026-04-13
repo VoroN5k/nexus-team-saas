@@ -285,7 +285,7 @@ export class AuthService {
       email:     user.email,
       firstName: user.firstName,
       lastName:  user.lastName,
-      // NOTE: role is per-workspace, not global — fetch via WorkspaceMember
+      role:      user.role,
     };
 
     return {

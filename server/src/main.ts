@@ -1,7 +1,7 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ValidationPipe, Logger } from '@nestjs/common';
-import cookieParser from 'cookie-parser';
+import * as cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 
@@ -34,49 +34,55 @@ async function bootstrap() {
       hsts: isProd
         ? { maxAge: 31_536_000, includeSubDomains: true, preload: true }
         : false,
-      noSniff:       true,
-      xssFilter:     true,
-      frameguard:    { action: 'deny' },
+      noSniff:        true,
+      xssFilter:      true,
+      frameguard:     { action: 'deny' },
       referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
-      hidePoweredBy: true,
+      hidePoweredBy:  true,
     }),
   );
 
-  // Cookie Parser
   app.use(cookieParser());
 
-  // Validation
-  // whitelist strips unknown props, forbidNonWhitelisted rejects them
   app.useGlobalPipes(
     new ValidationPipe({
-      whitelist:              true,
-      forbidNonWhitelisted:   true,
-      transform:              true,
-      transformOptions:       { enableImplicitConversion: false },
-      stopAtFirstError:       false,
+      whitelist:            true,
+      forbidNonWhitelisted: true,
+      transform:            true,
+      transformOptions:     { enableImplicitConversion: false },
+      stopAtFirstError:     false,
     }),
   );
 
-  // Global Exception Filter
-  // Prevents leaking stack traces / internal details in production
   app.useGlobalFilters(new AllExceptionsFilter());
-
-  // Global Prefix
   app.setGlobalPrefix('api');
 
   // CORS
-  const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? 'http://localhost:3000')
+  // Explicit allowed origins from env (comma-separated).
+  const explicitOrigins = (process.env.ALLOWED_ORIGINS ?? 'http://localhost:3000')
     .split(',')
     .map(o => o.trim());
 
   app.enableCors({
-    origin: (origin, cb) => {
-      // Allow server-to-server (no origin) and explicitly listed origins only
-      if (!origin || allowedOrigins.includes(origin)) {
-        cb(null, true);
-      } else {
-        cb(new Error(`CORS: origin '${origin}' not allowed`));
+    origin: (origin: string | undefined, cb: (err: Error | null, allow?: boolean) => void) => {
+      // Allow server-to-server requests (no origin header)
+      if (!origin) return cb(null, true);
+
+      // Allow any explicitly listed origin
+      if (explicitOrigins.includes(origin)) return cb(null, true);
+
+      // Allow any GitHub Codespaces forwarded-port origin automatically.
+      // These look like: https://<name>-<port>.app.github.dev
+      if (/^https:\/\/[a-z0-9-]+-\d+\.app\.github\.dev$/.test(origin)) {
+        return cb(null, true);
       }
+
+      // Allow any *.preview.app.github.dev (older Codespaces format)
+      if (/^https:\/\/[a-z0-9-]+\.preview\.app\.github\.dev$/.test(origin)) {
+        return cb(null, true);
+      }
+
+      cb(new Error(`CORS: origin '${origin}' not allowed`));
     },
     credentials:    true,
     methods:        ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],

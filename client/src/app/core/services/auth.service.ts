@@ -11,15 +11,24 @@ export interface JWTPayload {
   lastName: string;
 }
 
-const API = 'http://localhost:4000/api/auth';
+function apiBase(): string {
+  const { protocol, hostname } = window.location;
+  if (hostname === 'localhost') return `${protocol}//localhost:4000/api`;
+  const apiHost = hostname.replace(/-(\d+)\./, (_: string, p: string) =>
+    p === '3000' ? '-4000.' : `-${p}.`
+  );
+  return `${protocol}//${apiHost}/api`;
+}
+
+const API = `${apiBase()}/auth`;
 
 @Injectable({ providedIn: 'root' })
 export class AuthService {
   private _token = signal<string | null>(localStorage.getItem('access_token'));
   private _user  = signal<JWTPayload | null>(this.parseToken(localStorage.getItem('access_token')));
 
-  readonly token = this._token.asReadonly();
-  readonly user  = this._user.asReadonly();
+  readonly token      = this._token.asReadonly();
+  readonly user       = this._user.asReadonly();
   readonly isLoggedIn = () => !!this._token();
 
   constructor(private http: HttpClient, private router: Router) {}
@@ -70,8 +79,7 @@ export class AuthService {
   private parseToken(token: string | null): JWTPayload | null {
     if (!token) return null;
     try {
-      const payload = JSON.parse(atob(token.split('.')[1]));
-      return payload as JWTPayload;
+      return JSON.parse(atob(token.split('.')[1])) as JWTPayload;
     } catch { return null; }
   }
 }

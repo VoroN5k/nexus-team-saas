@@ -1,7 +1,14 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 
-const API = (wid: string) => `http://localhost:4000/api/workspaces/${wid}/tasks`;
+function apiBase(): string {
+  const { protocol, hostname } = window.location;
+  if (hostname === 'localhost') return `${protocol}//localhost:4000/api`;
+  const apiHost = hostname.replace(/-(\d+)\./, (_: string, p: string) =>
+    p === '3000' ? '-4000.' : `-${p}.`
+  );
+  return `${protocol}//${apiHost}/api`;
+}
 
 export type TaskStatus = 'TODO' | 'IN_PROGRESS' | 'REVIEW' | 'DONE';
 
@@ -21,19 +28,19 @@ export interface Task {
 export class TaskService {
   constructor(private http: HttpClient) {}
 
-  getAll(workspaceId: string) {
-    return this.http.get<Task[]>(API(workspaceId));
-  }
+  private url(wid: string) { return `${apiBase()}/workspaces/${wid}/tasks`; }
 
-  create(workspaceId: string, body: { title: string; description?: string; status?: TaskStatus; assignedId?: string }) {
-    return this.http.post<Task>(API(workspaceId), body);
-  }
+  getAll(workspaceId: string) { return this.http.get<Task[]>(this.url(workspaceId)); }
 
-  update(workspaceId: string, taskId: string, body: Partial<{ title: string; description: string; status: TaskStatus; assignedId: string | null }>) {
-    return this.http.patch<Task>(`${API(workspaceId)}/${taskId}`, body);
-  }
+  create(workspaceId: string, body: {
+    title: string; description?: string; status?: TaskStatus; assignedId?: string;
+  }) { return this.http.post<Task>(this.url(workspaceId), body); }
+
+  update(workspaceId: string, taskId: string, body: Partial<{
+    title: string; description: string; status: TaskStatus; assignedId: string | null;
+  }>) { return this.http.patch<Task>(`${this.url(workspaceId)}/${taskId}`, body); }
 
   delete(workspaceId: string, taskId: string) {
-    return this.http.delete(`${API(workspaceId)}/${taskId}`);
+    return this.http.delete(`${this.url(workspaceId)}/${taskId}`);
   }
 }

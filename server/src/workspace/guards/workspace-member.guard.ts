@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { Role } from '../../../generated/prisma';
+import { Role } from '../../../generated/prisma/client';
 import { REQUIRE_ROLES_KEY } from '../decorators/require-roles.decorator';
 
 @Injectable()
