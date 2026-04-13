@@ -1,4 +1,4 @@
-import { Component, OnInit, signal } from '@angular/core';
+import { Component, OnInit, signal, inject } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { AuthService } from '../../core/services/auth.service';
@@ -32,7 +32,6 @@ import { WorkspaceService, Workspace } from '../../core/services/workspace.servi
         </div>
       </nav>
 
-      <!-- Content -->
       <main class="max-w-5xl mx-auto px-6 py-10">
         <div class="flex items-center justify-between mb-8">
           <div>
@@ -49,7 +48,6 @@ import { WorkspaceService, Workspace } from '../../core/services/workspace.servi
           </button>
         </div>
 
-        <!-- Create workspace modal -->
         @if (showCreate()) {
           <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
             <div class="bg-slate-800 border border-slate-700 rounded-2xl p-6 w-full max-w-md shadow-2xl">
@@ -70,8 +68,7 @@ import { WorkspaceService, Workspace } from '../../core/services/workspace.servi
                   </div>
                   <div>
                     <label class="block text-sm font-medium text-slate-300 mb-1">Slug (URL)</label>
-                    <input type="text" name="slug" [(ngModel)]="newSlug" required
-                      pattern="[a-z0-9-]+"
+                    <input type="text" name="slug" [(ngModel)]="newSlug" required pattern="[a-z0-9-]+"
                       class="w-full px-4 py-2.5 bg-slate-900 border border-slate-600 rounded-lg text-white
                              placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                       placeholder="my-team"/>
@@ -93,7 +90,6 @@ import { WorkspaceService, Workspace } from '../../core/services/workspace.servi
           </div>
         }
 
-        <!-- Loading -->
         @if (loading()) {
           <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             @for (_ of [1,2,3]; track $index) {
@@ -105,7 +101,6 @@ import { WorkspaceService, Workspace } from '../../core/services/workspace.servi
           </div>
         }
 
-        <!-- Workspace cards -->
         @if (!loading()) {
           @if (workspaces().length === 0) {
             <div class="text-center py-20">
@@ -166,29 +161,29 @@ import { WorkspaceService, Workspace } from '../../core/services/workspace.servi
   `,
 })
 export class DashboardComponent implements OnInit {
-  workspaces = signal<Workspace[]>([]);
-  loading    = signal(true);
-  showCreate = signal(false);
-  creating   = signal(false);
+  // Use inject() so class-field initializers can reference services safely
+  private auth             = inject(AuthService);
+  private workspaceService = inject(WorkspaceService);
+  private router           = inject(Router);
+
+  // Now this is safe — auth is already set when the field initializer runs
+  readonly user = this.auth.user;
+
+  workspaces  = signal<Workspace[]>([]);
+  loading     = signal(true);
+  showCreate  = signal(false);
+  creating    = signal(false);
   createError = signal('');
-  newName    = '';
-  newSlug    = '';
+  newName     = '';
+  newSlug     = '';
 
-  constructor(
-    private auth: AuthService,
-    private workspaceService: WorkspaceService,
-    private router: Router,
-  ) {}
-
-  ngOnInit() {
-    this.load();
-  }
+  ngOnInit() { this.load(); }
 
   load() {
     this.loading.set(true);
     this.workspaceService.getAll().subscribe({
       next: (ws) => { this.workspaces.set(ws); this.loading.set(false); },
-      error: () => this.loading.set(false),
+      error: ()   => this.loading.set(false),
     });
   }
 
@@ -212,7 +207,5 @@ export class DashboardComponent implements OnInit {
     });
   }
 
-  logout() {
-    this.auth.logout();
-  }
+  logout() { this.auth.logout(); }
 }

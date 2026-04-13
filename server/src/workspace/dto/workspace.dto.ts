@@ -6,12 +6,12 @@ export class UpdateWorkspaceDto {
   @IsNotEmpty()
   @MinLength(3)
   @MaxLength(50)
-  name: string;
+  name!: string;
 }
 
 export class InviteMemberDto {
   @IsEmail()
-  email: string;
+  email!: string;
 
   @IsOptional()
   @IsEnum(Role)
@@ -20,5 +20,5 @@ export class InviteMemberDto {
 
 export class UpdateMemberRoleDto {
   @IsEnum(Role)
-  role: Role;
+  role!: Role;
 }
