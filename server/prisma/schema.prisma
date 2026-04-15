@@ -1,6 +1,6 @@
 generator client {
-  provider = "prisma-client"
-  output   = "../generated/prisma"
+  provider     = "prisma-client"
+  output       = "../generated/prisma"
   moduleFormat = "cjs"
 }
 
@@ -8,7 +8,7 @@ datasource db {
   provider = "postgresql"
 }
 
-// ENUMS
+// ─── ENUMS ───────────────────────────────────────────────────────────────────
 
 enum Role {
   OWNER
@@ -23,76 +23,178 @@ enum TaskStatus {
   DONE
 }
 
-model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  firstName String?
-  lastName String?
-  password  String  
-  isEmailVerified Boolean @default(false)
-  emailVerifyToken String? 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+enum AccessRequestStatus {
+  PENDING   // waiting for holders to submit shares
+  APPROVED  // quorum reached — shares forwarded to requester
+  EXPIRED   // TTL elapsed before quorum
+  DENIED    // manually cancelled by an admin/owner
+}
 
-  sessions Session[]
-  workspaces WorkspaceMember[]
-  tasks Task[] @relation("AssignedTasks")
+// ─── CORE MODELS ─────────────────────────────────────────────────────────────
+
+model User {
+  id               String   @id @default(uuid())
+  email            String   @unique
+  firstName        String?
+  lastName         String?
+  password         String
+  isEmailVerified  Boolean  @default(false)
+  emailVerifyToken String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  sessions         Session[]
+  workspaces       WorkspaceMember[]
+  tasks            Task[]           @relation("AssignedTasks")
+
+  // Vault relations
+  vaultsCreated    Vault[]           @relation("VaultCreator")
+  vaultShares      VaultShare[]      @relation("VaultShareHolder")
+  accessRequests   AccessRequest[]   @relation("AccessRequester")
+  shareSubmissions ShareSubmission[] @relation("ShareSubmitter")
 }
 
 model Workspace {
-  id String @id @default(uuid())
-  name String
-  slug String @unique // for urls
+  id        String   @id @default(uuid())
+  name      String
+  slug      String   @unique
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   members WorkspaceMember[]
-  tasks Task[]
+  tasks   Task[]
+  vaults  Vault[]
 }
 
-// table for multi-tenancy and user roles in workspaces
 model WorkspaceMember {
-  id String @id @default(uuid())
-  userId String
+  id          String   @id @default(uuid())
+  userId      String
   workspaceId String
-  role Role @default(MEMBER)
-  joinedAt DateTime @default(now())
+  role        Role     @default(MEMBER)
+  joinedAt    DateTime @default(now())
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@unique([userId, workspaceId])
 }
 
 model Task {
-  id String @id @default(uuid())
-  title String
+  id          String     @id @default(uuid())
+  title       String
   description String?
-  status TaskStatus @default(TODO)
-
-  // MULTI TENANT
+  status      TaskStatus @default(TODO)
   workspaceId String
+  assignedId  String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-
-  assignedId String?
-  assigned User? @relation("AssignedTasks", fields: [assignedId], references: [id], onDelete: SetNull)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
+  assigned  User?     @relation("AssignedTasks", fields: [assignedId], references: [id], onDelete: SetNull)
 }
 
 model Session {
-  id        String   @id @default(uuid())
-  userId    String
-  refreshToken     String   @unique
-  userAgent String?
-  ipAddress String?
-  deviceName String?
-  expiresAt DateTime
-  createdAt DateTime @default(now())
+  id           String   @id @default(uuid())
+  userId       String
+  refreshToken String   @unique
+  userAgent    String?
+  ipAddress    String?
+  deviceName   String?
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+}
+
+// ─── VAULT MODELS ────────────────────────────────────────────────────────────
+
+/// Metadata record for a zero-knowledge secret.
+/// The raw secret NEVER reaches the server — only encrypted SSS shares do.
+model Vault {
+  id          String   @id @default(uuid())
+  workspaceId String
+  createdById String
+
+  name        String   // human-readable label, e.g. "Production DB Password"
+  description String?
+
+  /// Shamir threshold: minimum shares needed to reconstruct (k)
+  threshold   Int
+  /// Total shares distributed (n)
+  totalShares Int
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace      Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy      User           @relation("VaultCreator", fields: [createdById], references: [id])
+  shares         VaultShare[]
+  accessRequests AccessRequest[]
+}
+
+/// One encrypted SSS share assigned to a specific key holder.
+/// encryptedShare = Encrypt(share_i, holder_public_key)
+/// Only the holder can decrypt this with their private key.
+model VaultShare {
+  id              String   @id @default(uuid())
+  vaultId         String
+  holderId        String
+
+  /// Ordinal index of this share within the SSS polynomial (1-based)
+  shareIndex      Int
+
+  /// Base64-encoded ciphertext: RSA-OAEP(holderPublicKey) over the raw SSS share hex
+  encryptedShare  String   @db.Text
+
+  /// Holder's SubjectPublicKeyInfo (SPKI) in base64 — stored so the client
+  /// can verify the encryption was made against the correct key pair
+  holderPublicKey String   @db.Text
+
+  createdAt       DateTime @default(now())
+
+  vault  Vault @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+  holder User  @relation("VaultShareHolder", fields: [holderId], references: [id])
+
+  @@unique([vaultId, holderId])   // one share slot per holder per vault
+  @@unique([vaultId, shareIndex]) // each index is unique within a vault
+  @@index([holderId])
+}
+
+/// A live request to reconstruct a secret — drives the collection quorum.
+model AccessRequest {
+  id          String              @id @default(uuid())
+  vaultId     String
+  requesterId String
+  status      AccessRequestStatus @default(PENDING)
+
+  /// Hard expiry — gateway evicts and marks EXPIRED after this timestamp
+  expiresAt   DateTime
+
+  createdAt   DateTime @default(now())
+
+  vault       Vault             @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+  requester   User              @relation("AccessRequester", fields: [requesterId], references: [id])
+  submissions ShareSubmission[]
+}
+
+/// Ephemeral plaintext SSS share submitted by a holder.
+/// The gateway IMMEDIATELY deletes all rows for a request once quorum is reached
+/// and shares have been forwarded to the requester over the encrypted WebSocket channel.
+model ShareSubmission {
+  id              String   @id @default(uuid())
+  accessRequestId String
+  holderId        String
+
+  /// Plaintext SSS share hex string (e.g. "801xxxxx…") — lives in DB only
+  /// for the brief window between submission and quorum dispatch.
+  share           String   @db.Text
+
+  submittedAt     DateTime @default(now())
+
+  accessRequest AccessRequest @relation(fields: [accessRequestId], references: [id], onDelete: Cascade)
+  holder        User          @relation("ShareSubmitter", fields: [holderId], references: [id])
+
+  @@unique([accessRequestId, holderId]) // one submission per holder per request
 }

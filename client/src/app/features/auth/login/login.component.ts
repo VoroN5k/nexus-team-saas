@@ -57,7 +57,7 @@ import { AuthService } from '../../../core/services/auth.service';
               type="submit"
               [disabled]="loading() || f.invalid"
               class="mt-6 w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed
-                     text-white font-semibold rounded-lg transition-colors"
+                     text-white font-semibold rounded-lg transition-colors cursor-pointer"
             >
               {{ loading() ? 'Signing in…' : 'Sign in' }}
             </button>
