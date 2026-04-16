@@ -129,4 +129,85 @@ export class VaultService {
  
     await this.prisma.vault.delete({ where: { id: vaultId } });
   }
+
+   /**
+   * Return the encrypted share assigned to a specific holder for a vault.
+   * The holder's client uses their private key to decrypt it locally,
+   * then submits the plaintext share to complete an access request.
+   */
+
+   async getMyEncryptedShare(vaultId: string, workspaceId: string, userId: string) {
+    await this.getVault(vaultId, workspaceId); // workspace scope check
+ 
+    const share = await this.prisma.vaultShare.findUnique({
+      where: { vaultId_holderId: { vaultId, holderId: userId } },
+      select: {
+        id:             true,
+        shareIndex:     true,
+        encryptedShare: true,
+        holderPublicKey: true,
+      },
+    });
+ 
+    if (!share) {
+      throw new NotFoundException('You are not a key holder for this vault');
+    }
+ 
+    return share;
+  }
+
+   
+  //Access Requests
+  /**
+  * Create a new access request for a vault.
+  * Returns the full request with share metadata so the caller can notify
+  * holders via the WebSocket gateway.
+  */
+
+  async createAccessRequest(
+    vaultId:     string,
+    workspaceId: string,
+    requesterId: string,
+    dto:         CreateAccessRequestDto,
+  ) {
+    const vault = await this.getVault(vaultId, workspaceId);
+ 
+    // Check if there is already an active (PENDING) request from this user
+    const existing = await this.prisma.accessRequest.findFirst({
+      where: {
+        vaultId,
+        requesterId,
+        status:    AccessRequestStatus.PENDING,
+        expiresAt: { gt: new Date() },
+      },
+    });
+ 
+    if (existing) {
+      throw new ConflictException(
+        'You already have an active access request for this vault',
+      );
+    }
+ 
+    const expiresAt = new Date(Date.now() + ACCESS_REQUEST_TTL_MS);
+ 
+    const request = await this.prisma.accessRequest.create({
+      data:    { vaultId, requesterId, expiresAt },
+      include: {
+        vault:     { select: { id: true, name: true, threshold: true, totalShares: true } },
+        requester: { select: { id: true, firstName: true, lastName: true, email: true } },
+      },
+    });
+ 
+    return {
+      ...request,
+      reason:   dto.reason,
+      holders:  vault.shares.map((s: any) => ({
+        holderId:       s.holderId,
+        holderPublicKey: s.holderPublicKey,
+        holder:         s.holder,
+      })),
+    };
+  }
+
+
 }
