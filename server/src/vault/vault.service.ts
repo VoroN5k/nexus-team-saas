@@ -20,7 +20,7 @@ export interface QuorumReachedPayload {
   accessRequestId: string;
   vaultId: string;
   requesterId: string;
-  shares: Array<{ holderId: string; share: string }>;
+  shares: Array<{ holderId: string; shareIndex: number; share: string }>;
 }
 
 @Injectable()
@@ -39,7 +39,7 @@ export class VaultService {
     const { name, description, threshold, totalShares, shares } = dto;
 
     if (threshold > totalShares)
-      throw new BadRequestException('theshold must e < total Shares');
+      throw new BadRequestException('threshold must be <= totalShares');
 
     if (shares.length !== totalShares)
       throw new BadRequestException(
@@ -55,13 +55,11 @@ export class VaultService {
       }
     }
 
-    // Validate holder uniqueness
     const holderIds = shares.map((s) => s.holderId);
     if (new Set(holderIds).size !== holderIds.length) {
       throw new BadRequestException('Duplicate holder IDs in shares array');
     }
 
-    // Validate all holders are workspace members
     const memberships = await this.prisma.workspaceMember.findMany({
       where: { workspaceId, userId: { in: holderIds } },
       select: { userId: true },
@@ -75,7 +73,6 @@ export class VaultService {
       );
     }
 
-    // Create vault + shares in a single transaction
     return this.prisma.$transaction(async (tx) => {
       const vault = await tx.vault.create({
         data: {
@@ -132,8 +129,7 @@ export class VaultService {
   }
 
   async getVault(vaultId: string, workspaceId: string) {
-    const vault = await this.findVaultById(vaultId, workspaceId);
-    return vault;
+    return this.findVaultById(vaultId, workspaceId);
   }
 
   async deleteVault(
@@ -141,7 +137,7 @@ export class VaultService {
     workspaceId: string,
     requestingRole: Role,
   ) {
-    await this.getVault(vaultId, workspaceId); // 404 guard
+    await this.getVault(vaultId, workspaceId);
 
     if (requestingRole === Role.MEMBER) {
       throw new ForbiddenException('Only ADMIN and OWNER can delete vaults');
@@ -150,18 +146,12 @@ export class VaultService {
     await this.prisma.vault.delete({ where: { id: vaultId } });
   }
 
-  /**
-   * Return the encrypted share assigned to a specific holder for a vault.
-   * The holder's client uses their private key to decrypt it locally,
-   * then submits the plaintext share to complete an access request.
-   */
-
   async getMyEncryptedShare(
     vaultId: string,
     workspaceId: string,
     userId: string,
   ) {
-    await this.getVault(vaultId, workspaceId); // workspace scope check
+    await this.getVault(vaultId, workspaceId);
 
     const share = await this.prisma.vaultShare.findUnique({
       where: { vaultId_holderId: { vaultId, holderId: userId } },
@@ -180,13 +170,6 @@ export class VaultService {
     return share;
   }
 
-  //Access Requests
-  /**
-   * Create a new access request for a vault.
-   * Returns the full request with share metadata so the caller can notify
-   * holders via the WebSocket gateway.
-   */
-
   async createAccessRequest(
     vaultId: string,
     workspaceId: string,
@@ -195,7 +178,6 @@ export class VaultService {
   ) {
     const vault = await this.getVault(vaultId, workspaceId);
 
-    // Check if there is already an active (PENDING) request from this user
     const existing = await this.prisma.accessRequest.findFirst({
       where: {
         vaultId,
@@ -236,13 +218,12 @@ export class VaultService {
     };
   }
 
-  /** Get the current status of an access request, including submission count. */
   async getAccessRequest(
     accessRequestId: string,
     vaultId: string,
     workspaceId: string,
   ) {
-    await this.getVault(vaultId, workspaceId); // scope check
+    await this.getVault(vaultId, workspaceId);
 
     const request = await this.prisma.accessRequest.findUnique({
       where: { id: accessRequestId },
@@ -268,11 +249,9 @@ export class VaultService {
     return request;
   }
 
-  /** List access requests for a vault (metadata only — no share content). */
   async listAccessRequests(vaultId: string, workspaceId: string) {
     await this.getVault(vaultId, workspaceId);
 
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-return
     return this.prisma.accessRequest.findMany({
       where: { vaultId },
       include: {
@@ -285,22 +264,6 @@ export class VaultService {
     });
   }
 
-  /**
-   * A key holder submits their decrypted SSS share.
-   *
-   * Flow:
-   *   1. Validate the request is still PENDING and not expired.
-   *   2. Confirm the submitter is actually a holder for this vault.
-   *   3. Persist the share submission (upsert — idempotent).
-   *   4. Count submissions — if threshold reached:
-   *        a. Mark request as APPROVED.
-   *        b. Collect all plaintext shares.
-   *        c. Return them so the gateway can forward to the requester.
-   *        d. Purge ShareSubmission rows immediately.
-   *
-   * Returns null if threshold not yet met, or QuorumReachedPayload if it is.
-   */
-
   async submitShare(
     accessRequestId: string,
     vaultId: string,
@@ -308,11 +271,9 @@ export class VaultService {
     holderId: string,
     dto: SubmitShareDto,
   ): Promise<QuorumReachedPayload | null> {
-    // ── Validate vault scope
     await this.getVault(vaultId, workspaceId);
 
     return this.prisma.$transaction(async (tx) => {
-      // ── Load request with write lock (serialisable)
       const request = await tx.accessRequest.findUnique({
         where: { id: accessRequestId },
         include: {
@@ -339,7 +300,6 @@ export class VaultService {
         throw new BadRequestException('Access request has expired');
       }
 
-      // ── Confirm submitter is a designated holder
       const holderShare = await tx.vaultShare.findUnique({
         where: { vaultId_holderId: { vaultId, holderId } },
       });
@@ -348,14 +308,12 @@ export class VaultService {
         throw new ForbiddenException('You are not a key holder for this vault');
       }
 
-      // ── Upsert submission (idempotent — holder may re-submit same share)
       await tx.shareSubmission.upsert({
         where: { accessRequestId_holderId: { accessRequestId, holderId } },
         create: { accessRequestId, holderId, share: dto.share },
         update: { share: dto.share },
       });
 
-      // ── Recount submissions after upsert
       const allSubmissions = await tx.shareSubmission.findMany({
         where: { accessRequestId },
       });
@@ -365,31 +323,36 @@ export class VaultService {
 
       this.logger.log(
         `Vault ${vaultId} access request ${accessRequestId}: ` +
-          `${submissionCount}/${threshold} shares collected`,
+        `${submissionCount}/${threshold} shares collected`,
       );
 
-      // ── Threshold not yet met — return null
       if (submissionCount < threshold) {
         return null;
       }
 
-      // ── Quorum reached — collect shares and mark APPROVED
       await tx.accessRequest.update({
         where: { id: accessRequestId },
         data: { status: AccessRequestStatus.APPROVED },
       });
 
+      const vaultShares = await tx.vaultShare.findMany({
+        where: { vaultId, holderId: { in: allSubmissions.map(s => s.holderId) } },
+        select: { holderId: true, shareIndex: true },
+      });
+
+      const indexByHolder = new Map(vaultShares.map(s => [s.holderId, s.shareIndex]));
+
       const sharesPayload = allSubmissions.map((s) => ({
         holderId: s.holderId,
+        shareIndex: indexByHolder.get(s.holderId) ?? 1,
         share: s.share,
       }));
 
-      // ── Purge ephemeral share submissions immediately
       await tx.shareSubmission.deleteMany({ where: { accessRequestId } });
 
       this.logger.log(
         `Vault ${vaultId}: quorum reached for request ${accessRequestId}. ` +
-          `Shares purged from DB after forwarding.`,
+        `Shares purged from DB after forwarding.`,
       );
 
       return {
@@ -400,11 +363,6 @@ export class VaultService {
       };
     });
   }
-
-  /**
-   * Deny or cancel a pending access request.
-   * Only ADMIN/OWNER or the original requester can cancel.
-   */
 
   async denyAccessRequest(
     accessRequestId: string,
@@ -442,10 +400,6 @@ export class VaultService {
     });
   }
 
-  /**
-   * Background cleanup: mark all PENDING requests past their expiresAt as EXPIRED.
-   * Call this from a scheduled job (e.g. @nestjs/schedule) or on-demand.
-   */
   async expireStaleRequests() {
     const { count } = await this.prisma.accessRequest.updateMany({
       where: {
@@ -460,7 +414,6 @@ export class VaultService {
     }
   }
 
-  // Private Helpers
   private async findVaultById(vaultId: string, workspaceId: string, tx?: any) {
     const db = tx ?? this.prisma;
 

@@ -71,7 +71,7 @@ export interface VaultNotification {
 export interface QuorumPayload {
   accessRequestId: string;
   vaultId: string;
-  shares: Array<{ holderId: string; share: string }>;
+  shares: Array<{ holderId: string; shareIndex: number; share: string }>;
 }
 
 // ── GF(256) Arithmetic & Shamir's Secret Sharing ─────────────────────────────
@@ -320,25 +320,16 @@ export class VaultService {
     // Quorum reached — reconstruct secret in-browser
     this.socket.on('vault:quorum_reached', async (data: QuorumPayload) => {
       try {
-        const { privateKey } = await this.ensureKeyPair();
-        const myId = this.auth.user()?.sub;
-
-        // Find MY share in the payload
-        const mySubmission = data.shares.find(s => s.holderId === myId);
-        if (!mySubmission) {
-          console.warn('Quorum reached but no share for current user — not the requester');
-        }
-
-        // Reconstruct from all shares
+        // Each share in the payload now carries its correct shareIndex
         const parsedShares = data.shares.map(s => {
-          const bytes = Uint8Array.from(
-            s.share.match(/.{1,2}/g)!.map(h => parseInt(h, 16)),
-          );
-          return { index: parseInt(s.holderId.slice(-2), 16) || 1, share: bytes };
+          const hexStr = s.share;
+          const bytes = new Uint8Array(hexStr.length / 2);
+          for (let i = 0; i < bytes.length; i++) {
+            bytes[i] = parseInt(hexStr.slice(i * 2, i * 2 + 2), 16);
+          }
+          return { index: s.shareIndex, share: bytes };
         });
 
-        // Note: we store the raw share data — actual reconstruction uses sscombine
-        // The shares here are already plaintext (submitted by holders)
         const combined = sscombine(parsedShares);
         const secret   = new TextDecoder().decode(combined);
 
@@ -348,7 +339,6 @@ export class VaultService {
           return next;
         });
 
-        // Auto-clear secret after 5 minutes
         setTimeout(() => {
           this.unlockedSecrets.update(m => {
             const next = new Map(m);
@@ -382,6 +372,44 @@ export class VaultService {
     this.pendingNotifications.update(ns =>
       ns.filter(n => n.accessRequestId !== accessRequestId),
     );
+  }
+
+  restoreNotificationsFromRequests(
+    pendingRequests: AccessRequest[],
+    vaults: Vault[],
+    myUserId: string,
+  ): void {
+    const existing = new Set(this.pendingNotifications().map(n => n.accessRequestId));
+
+    for (const req of pendingRequests) {
+      if (existing.has(req.id)) continue;
+
+      const vault = vaults.find(v => v.id === req.vaultId);
+      if (!vault) continue;
+
+      // Check if I am a holder for this vault
+      const amHolder = vault.shares.some(s => s.holderId === myUserId);
+      if (!amHolder) continue;
+
+      // Check I haven't already submitted
+      const alreadySubmitted = req.submissions.some(s => s.holderId === myUserId);
+      if (alreadySubmitted) continue;
+
+      const notif: VaultNotification = {
+        type: 'access_requested',
+        accessRequestId: req.id,
+        vaultId: req.vaultId,
+        vaultName: vault.name,
+        requesterId: req.requesterId,
+        requesterName: `${req.requester.firstName} ${req.requester.lastName}`,
+        holderIds: vault.shares.map(s => s.holderId),
+        threshold: vault.threshold,
+        totalShares: vault.totalShares,
+        expiresAt: req.expiresAt,
+      };
+
+      this.pendingNotifications.update(ns => [...ns, notif]);
+    }
   }
 
   // HTTP API
@@ -505,11 +533,20 @@ export class VaultService {
     vaultId: string,
     accessRequestId: string,
   ): Promise<{ status: string; submittedCount: number }> {
-    const { privateKey } = await this.ensureKeyPair();
+    const { privateKey, publicKey } = await this.ensureKeyPair();
 
     const encShare = await firstValueFrom(
       this.getMyEncryptedShare(workspaceId, vaultId),
     );
+
+    // Validate that our local key matches what was used to encrypt the share
+    if (encShare.holderPublicKey !== publicKey) {
+      throw new Error(
+        'Key mismatch: your local private key does not match the public key used to encrypt your share. ' +
+        'This happens when vault was created in a different browser session. ' +
+        'Ask the vault creator to recreate the vault with your current public key.',
+      );
+    }
 
     const plainHex = await decryptShare(encShare.encryptedShare, privateKey);
 
