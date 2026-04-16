@@ -2,9 +2,11 @@ import { HttpInterceptorFn, HttpErrorResponse } from '@angular/common/http';
 import { inject } from '@angular/core';
 import { AuthService } from '../services/auth.service';
 import { catchError, switchMap, throwError } from 'rxjs';
+import { Router } from '@angular/router';
 
 export const authInterceptor: HttpInterceptorFn = (req, next) => {
   const auth = inject(AuthService);
+  const router = inject(Router);
   const token = auth.token();
 
   const authReq = token
@@ -21,7 +23,9 @@ export const authInterceptor: HttpInterceptorFn = (req, next) => {
             return next(retried);
           }),
           catchError(refreshErr => {
+            // Clear token and redirect to login to avoid leaving UI in inconsistent state
             auth.clearToken();
+            try { router.navigate(['/login']); } catch (_) {}
             return throwError(() => refreshErr);
           })
         );

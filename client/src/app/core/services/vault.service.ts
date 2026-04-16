@@ -445,6 +445,13 @@ export class VaultService {
       holders: Array<{ id: string; publicKey: string }>;
     },
   ) {
+    console.debug('VaultService.createVault: start', {
+      workspaceId,
+      name: opts.name,
+      threshold: opts.threshold,
+      holders: opts.holders.length,
+    });
+
     const secretBytes = new TextEncoder().encode(opts.secret);
     const n           = opts.holders.length;
     const k           = opts.threshold;
@@ -456,15 +463,25 @@ export class VaultService {
       rawShares.map(async (s, idx) => {
         const holder   = opts.holders[idx];
         const shareHex = Array.from(s.share).map(b => b.toString(16).padStart(2, '0')).join('');
-        const enc      = await encryptShare(shareHex, holder.publicKey);
-        return {
-          holderId:       holder.id,
-          shareIndex:     s.index,
-          encryptedShare: enc,
-          holderPublicKey: holder.publicKey,
-        };
+        try {
+          const enc      = await encryptShare(shareHex, holder.publicKey);
+          return {
+            holderId:       holder.id,
+            shareIndex:     s.index,
+            encryptedShare: enc,
+            holderPublicKey: holder.publicKey,
+          };
+        } catch (err) {
+          console.error('VaultService.createVault: failed to encrypt share for holder', holder.id, err);
+          throw new Error(`Failed to encrypt share for holder ${holder.id}: ${(err as any)?.message ?? String(err)}`);
+        }
       }),
     );
+
+    console.debug('VaultService.createVault: encrypted shares ready, posting to API', {
+      workspaceId,
+      shares: encryptedShares.length,
+    });
 
     return firstValueFrom(
       this.http.post<Vault>(this.url(workspaceId), {

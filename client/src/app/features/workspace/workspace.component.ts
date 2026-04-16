@@ -392,7 +392,13 @@ export class WorkspaceComponent implements OnInit {
     return map as Record<TaskStatus, Task[]>;
   });
 
-  readonly myRole = computed(() => this.workspace()?.myRole ?? 'MEMBER');
+  readonly myRole = computed(() => {
+    const wsRole = (this.workspace() as any)?.myRole;
+    if (wsRole) return wsRole;
+    const userId = this.auth.user()?.sub;
+    const member = this.members().find(m => m.user.id === userId);
+    return member?.role ?? 'MEMBER';
+  });
 
   constructor(
     private route:       ActivatedRoute,

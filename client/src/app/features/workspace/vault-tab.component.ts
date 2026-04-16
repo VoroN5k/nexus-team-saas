@@ -5,6 +5,7 @@ import { FormsModule } from '@angular/forms';
 import { VaultService, Vault, AccessRequest, VaultNotification } from '../../core/services/vault.service';
 import { WorkspaceService, Member } from '../../core/services/workspace.service';
 import { AuthService } from '../../core/services/auth.service';
+import { Router } from '@angular/router';
 
 @Component({
   selector: 'app-vault-tab',
@@ -390,6 +391,12 @@ export class VaultTabComponent implements OnInit, OnDestroy {
   );
 
   ngOnInit() {
+    // If not authenticated, redirect to login and avoid making API calls (prevents 401s in incognito)
+    if (!this.auth.isLoggedIn()) {
+      try { inject(Router).navigate(['/login']); } catch (e) { /* noop */ }
+      return;
+    }
+
     this.hasKeys.set(this.vaultService.hasKeyPair());
     this.vaultService.connectSocket(this.workspaceId);
     this.load();
@@ -416,22 +423,34 @@ export class VaultTabComponent implements OnInit, OnDestroy {
   private loadRequests(vaultId: string) {
     this.vaultService.listAccessRequests(this.workspaceId, vaultId).subscribe({
       next: reqs => {
-        const pending = reqs.filter(r => r.status === 'PENDING');
+        if (!Array.isArray(reqs)) {
+          console.error('Unexpected listAccessRequests response', reqs);
+          return;
+        }
+        // Server's listAccessRequests does NOT include `vault` in the result (see server implementation).
+        // Previously we filtered out entries missing r.vault which caused real pending requests to disappear.
+        const pending = reqs.filter(r => r && r.status === 'PENDING');
         this.accessRequests.update(all => {
           const filtered = all.filter(r => r.vaultId !== vaultId);
           return [...filtered, ...pending];
         });
-        // Seed progress map
+        // Seed progress map. If server response doesn't include vault.threshold, fall back to local vault info
+        const localVault = this.vaults().find(v => v.id === vaultId);
+        const fallbackThreshold = localVault?.threshold ?? 1;
         pending.forEach(r => {
+          const threshold = r.vault?.threshold ?? fallbackThreshold;
           this.vaultService.requestProgress.update(m => {
             const next = new Map(m);
             if (!next.has(r.id)) {
-              next.set(r.id, { submitted: r.submissions.length, threshold: r.vault.threshold });
+              next.set(r.id, { submitted: r.submissions.length, threshold });
             }
             return next;
           });
         });
       },
+      error: err => {
+        console.warn('Failed to load access requests for vault', vaultId, err);
+      }
     });
   }
 
@@ -507,8 +526,22 @@ export class VaultTabComponent implements OnInit, OnDestroy {
       this.vaults.update(vs => [vault, ...vs]);
       this.showCreate.set(false);
     } catch (e: any) {
-      const msg = e?.error?.message;
-      this.createError.set(Array.isArray(msg) ? msg.join(', ') : (msg ?? 'Failed to create vault'));
+      // Log full error for debugging (network/encryption failures often surface here)
+      console.error('createVault failed', e);
+
+      // Derive a friendly message to show in the UI
+      let msg = 'Failed to create vault';
+      if (e instanceof Error) {
+        msg = e.message || msg;
+      } else if (e?.error) {
+        const err = e.error;
+        if (typeof err === 'string') msg = err;
+        else if (err?.message) msg = Array.isArray(err.message) ? err.message.join(', ') : err.message;
+        else msg = JSON.stringify(err);
+      } else if (e?.message) {
+        msg = e.message;
+      }
+      this.createError.set(msg);
     } finally {
       this.creating.set(false);
     }
