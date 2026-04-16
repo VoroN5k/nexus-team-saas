@@ -369,4 +369,43 @@ export class VaultService {
     });
   }
 
+  /**
+   * Deny or cancel a pending access request.
+   * Only ADMIN/OWNER or the original requester can cancel.
+   */
+
+  async denyAccessRequest(
+    accessRequestId: string,
+    vaultId:         string,
+    workspaceId:     string,
+    userId:          string,
+    role:            Role,
+  ) {
+    await this.getVault(vaultId, workspaceId);
+ 
+    const request = await this.prisma.accessRequest.findUnique({
+      where: { id: accessRequestId },
+    });
+ 
+    if (!request || request.vaultId !== vaultId) {
+      throw new NotFoundException('Access request not found');
+    }
+ 
+    if (request.status !== AccessRequestStatus.PENDING) {
+      throw new BadRequestException(`Request is already ${request.status.toLowerCase()}`);
+    }
+ 
+    const isPrivileged = role === Role.ADMIN || role === Role.OWNER;
+    const isSelf       = request.requesterId === userId;
+ 
+    if (!isPrivileged && !isSelf) {
+      throw new ForbiddenException('You cannot deny this access request');
+    }
+ 
+    return this.prisma.accessRequest.update({
+      where: { id: accessRequestId },
+      data:  { status: AccessRequestStatus.DENIED },
+    });
+  }
+
 }
