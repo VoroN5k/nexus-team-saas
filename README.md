@@ -1,4 +1,4 @@
-# 📄 Project Technical Specification (Scheda Tecnica)
+# 📄 Project Technical Specification
 
 ## 🏗 Project Identity
 * **Name:** MVP NexusTeam – Modern Team Workspace SaaS
