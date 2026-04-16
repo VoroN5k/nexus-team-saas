@@ -38,6 +38,59 @@ export class VaultService {
 
         if (shares.length !== totalShares) throw new BadRequestException(`Expected ${totalShares} shares but received ${shares.length}`)
 
-            
+        const indices = shares.map(s => s.shareIndex).sort((a, b) => a - b);
+        for (let i = 0; i < indices.length; i++) {
+      if (indices[i] !== i + 1) {
+        throw new BadRequestException(
+          'Share indices must be unique and span 1..totalShares',
+        );
+      }
     }
+ 
+    // ── Validate holder uniqueness
+    const holderIds = shares.map(s => s.holderId);
+    if (new Set(holderIds).size !== holderIds.length) {
+      throw new BadRequestException('Duplicate holder IDs in shares array');
+    }
+ 
+    // ── Validate all holders are workspace members
+    const memberships = await this.prisma.workspaceMember.findMany({
+      where: { workspaceId, userId: { in: holderIds } },
+      select: { userId: true },
+    });
+ 
+    if (memberships.length !== holderIds.length) {
+      const foundIds = new Set(memberships.map(m => m.userId));
+      const missing  = holderIds.filter(id => !foundIds.has(id));
+      throw new BadRequestException(
+        `The following holder IDs are not workspace members: ${missing.join(', ')}`,
+      );
+    }
+ 
+    // ── Create vault + shares in a single transaction
+    return this.prisma.$transaction(async (tx) => {
+      const vault = await tx.vault.create({
+        data: {
+          workspaceId,
+          createdById,
+          name,
+          description,
+          threshold,
+          totalShares,
+        },
+      });
+ 
+      await tx.vaultShare.createMany({
+        data: shares.map(s => ({
+          vaultId:         vault.id,
+          holderId:        s.holderId,
+          shareIndex:      s.shareIndex,
+          encryptedShare:  s.encryptedShare,
+          holderPublicKey: s.holderPublicKey,
+        })),
+      });
+ 
+      return this.findVaultById(vault.id, workspaceId, tx);
+    });
+  }
 }
