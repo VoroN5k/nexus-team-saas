@@ -47,13 +47,13 @@ export class VaultService {
       }
     }
  
-    // ── Validate holder uniqueness
+    // Validate holder uniqueness
     const holderIds = shares.map(s => s.holderId);
     if (new Set(holderIds).size !== holderIds.length) {
       throw new BadRequestException('Duplicate holder IDs in shares array');
     }
  
-    // ── Validate all holders are workspace members
+    // Validate all holders are workspace members
     const memberships = await this.prisma.workspaceMember.findMany({
       where: { workspaceId, userId: { in: holderIds } },
       select: { userId: true },
@@ -67,7 +67,7 @@ export class VaultService {
       );
     }
  
-    // ── Create vault + shares in a single transaction
+    // Create vault + shares in a single transaction
     return this.prisma.$transaction(async (tx) => {
       const vault = await tx.vault.create({
         data: {
@@ -93,4 +93,25 @@ export class VaultService {
       return this.findVaultById(vault.id, workspaceId, tx);
     });
   }
+
+  async listVaults(workspaceId: string) {
+    return this.prisma.vault.findMany({
+      where:   { workspaceId },
+      include: {
+        createdBy: { select: { id: true, firstName: true, lastName: true, email: true } },
+        shares: {
+          select: {
+            id:        true,
+            shareIndex: true,
+            holderId:  true,
+            holderPublicKey: true,
+            holder: { select: { id: true, firstName: true, lastName: true, email: true } },
+          },
+        },
+        _count: { select: { accessRequests: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+  
 }
