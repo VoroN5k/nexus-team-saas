@@ -408,4 +408,50 @@ export class VaultService {
     });
   }
 
+  /**
+   * Background cleanup: mark all PENDING requests past their expiresAt as EXPIRED.
+   * Call this from a scheduled job (e.g. @nestjs/schedule) or on-demand.
+   */
+  async expireStaleRequests() {
+    const { count } = await this.prisma.accessRequest.updateMany({
+      where: {
+        status:    AccessRequestStatus.PENDING,
+        expiresAt: { lt: new Date() },
+      },
+      data: { status: AccessRequestStatus.EXPIRED },
+    });
+ 
+    if (count > 0) {
+      this.logger.log(`Expired ${count} stale access request(s)`);
+    }
+  }
+ 
+  // Private Helpers 
+  private async findVaultById(vaultId: string, workspaceId: string, tx?: any) {
+    const db = tx ?? this.prisma;
+ 
+    const vault = await db.vault.findUnique({
+      where:   { id: vaultId },
+      include: {
+        createdBy: { select: { id: true, firstName: true, lastName: true, email: true } },
+        shares: {
+          select: {
+            id:              true,
+            shareIndex:      true,
+            holderId:        true,
+            holderPublicKey: true,
+            holder: { select: { id: true, firstName: true, lastName: true, email: true } },
+          },
+          orderBy: { shareIndex: 'asc' },
+        },
+      },
+    });
+ 
+    if (!vault || vault.workspaceId !== workspaceId) {
+      throw new NotFoundException('Vault not found');
+    }
+ 
+    return vault;
+  }
+
 }
