@@ -239,4 +239,18 @@ export class VaultService {
     return request;
   }
 
+   /** List access requests for a vault (metadata only — no share content). */
+  async listAccessRequests(vaultId: string, workspaceId: string) {
+    await this.getVault(vaultId, workspaceId);
+ 
+    return this.prisma.accessRequest.findMany({
+      where: { vaultId },
+      include: {
+        requester:   { select: { id: true, firstName: true, lastName: true, email: true } },
+        submissions: { select: { holderId: true, submittedAt: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
 }
