@@ -13,24 +13,16 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
-// Share DTOs 
+// Share DTOs
+
 export class CreateShareDto {
-  /** ID of the workspace member who holds this share */
   @IsUUID()
   holderId!: string;
 
-  /**
-   * Base64-encoded ciphertext:
-   *   RSA-OAEP(holderPublicKey, sssShareHex)
-   */
   @IsString()
   @IsNotEmpty()
   encryptedShare!: string;
 
-  /**
-   * Holder's SubjectPublicKeyInfo (SPKI) exported as base64.
-   * Stored so the client can later verify encryption provenance.
-   */
   @IsString()
   @IsNotEmpty()
   holderPublicKey!: string;
@@ -53,25 +45,16 @@ export class CreateVaultDto {
   @MaxLength(500)
   description?: string;
 
-  /**
-   * Minimum shares required to reconstruct the secret (k).
-   * Must be ≤ totalShares (n).
-   */
   @IsInt()
   @Min(2)
   @Max(20)
   threshold!: number;
 
-  /**
-   * Total number of shares distributed (n).
-   * Must equal shares.length.
-   */
   @IsInt()
   @Min(2)
   @Max(20)
   totalShares!: number;
 
-  /** Encrypted share for each key holder — must have exactly totalShares entries */
   @IsArray()
   @ArrayMinSize(2)
   @ValidateNested({ each: true })
@@ -81,22 +64,41 @@ export class CreateVaultDto {
 
 // Access Request
 
-/** Initiate a quorum access request for a specific vault */
 export class CreateAccessRequestDto {
-  /**
-   * Optional reason displayed to key holders in the WebSocket notification.
-   * Helps them decide whether to approve.
-   */
   @IsOptional()
   @IsString()
   @MaxLength(300)
   reason?: string;
 }
 
-
 export class SubmitShareDto {
-  
   @IsString()
   @IsNotEmpty()
   share!: string;
+}
+
+// Key Rotation
+
+/** Holder initiates rotation: I have a new key pair, please help me re-encrypt my share */
+export class CreateRotationRequestDto {
+  /** The requester's NEW RSA-OAEP public key (base64 SPKI) */
+  @IsString()
+  @IsNotEmpty()
+  newPublicKey!: string;
+}
+
+/** Another holder submits their plaintext share to help reach rotation quorum */
+export class SubmitRotationShareDto {
+  @IsString()
+  @IsNotEmpty()
+  share!: string;
+}
+
+/** After quorum, requester sends back all re-encrypted shares */
+export class FinalizeRotationDto {
+  @IsArray()
+  @ArrayMinSize(2)
+  @ValidateNested({ each: true })
+  @Type(() => CreateShareDto)
+  shares!: CreateShareDto[];
 }

@@ -28,27 +28,38 @@ enum AccessRequestStatus {
   DENIED
 }
 
+enum RotationRequestStatus {
+  PENDING
+  APPROVED
+  EXPIRED
+  DENIED
+}
+
 model User {
-  id               String   @id @default(uuid())
-  email            String   @unique
+  id               String    @id @default(uuid())
+  email            String    @unique
   firstName        String?
   lastName         String?
   password         String
-  isEmailVerified  Boolean  @default(false)
+  isEmailVerified  Boolean   @default(false)
   emailVerifyToken String?
   /// RSA-OAEP SPKI public key (base64) — published by client for vault share encryption
-  publicKey        String?  @db.Text
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  publicKey        String?   @db.Text
+  /// Updated on every login / token refresh — used for quorum health checks
+  lastSeenAt       DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
-  sessions         Session[]
-  workspaces       WorkspaceMember[]
-  tasks            Task[]            @relation("AssignedTasks")
-  vaultsCreated    Vault[]           @relation("VaultCreator")
-  vaultShares      VaultShare[]      @relation("VaultShareHolder")
-  accessRequests   AccessRequest[]   @relation("AccessRequester")
-  shareSubmissions ShareSubmission[] @relation("ShareSubmitter")
-  invitesCreated   WorkspaceInvite[] @relation("InviteCreator")
+  sessions            Session[]
+  workspaces          WorkspaceMember[]
+  tasks               Task[]                 @relation("AssignedTasks")
+  vaultsCreated       Vault[]                @relation("VaultCreator")
+  vaultShares         VaultShare[]           @relation("VaultShareHolder")
+  accessRequests      AccessRequest[]        @relation("AccessRequester")
+  shareSubmissions    ShareSubmission[]      @relation("ShareSubmitter")
+  rotationRequests    ShareRotationRequest[] @relation("RotationRequester")
+  rotationSubmissions RotationSubmission[]   @relation("RotationSubmitter")
+  invitesCreated      WorkspaceInvite[]      @relation("InviteCreator")
 }
 
 model Workspace {
@@ -134,10 +145,11 @@ model Vault {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  workspace      Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  createdBy      User            @relation("VaultCreator", fields: [createdById], references: [id])
-  shares         VaultShare[]
-  accessRequests AccessRequest[]
+  workspace        Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy        User                   @relation("VaultCreator", fields: [createdById], references: [id])
+  shares           VaultShare[]
+  accessRequests   AccessRequest[]
+  rotationRequests ShareRotationRequest[]
 }
 
 model VaultShare {
@@ -181,4 +193,38 @@ model ShareSubmission {
   holder        User          @relation("ShareSubmitter", fields: [holderId], references: [id])
 
   @@unique([accessRequestId, holderId])
+}
+
+/// A key holder who has a new key pair requests their VaultShare to be re-encrypted.
+/// Other holders submit their plaintext shares; once k shares are collected the
+/// requester reconstructs the secret client-side and re-splits with fresh keys.
+model ShareRotationRequest {
+  id           String                @id @default(uuid())
+  vaultId      String
+  requesterId  String
+  /// The requester's NEW public key - used to encrypt their new share after rotation
+  newPublicKey String                @db.Text
+  status       RotationRequestStatus @default(PENDING)
+  expiresAt    DateTime
+  createdAt    DateTime              @default(now())
+
+  vault       Vault                @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+  requester   User                 @relation("RotationRequester", fields: [requesterId], references: [id])
+  submissions RotationSubmission[]
+
+  @@index([vaultId])
+  @@index([requesterId])
+}
+
+model RotationSubmission {
+  id                String   @id @default(uuid())
+  rotationRequestId String
+  holderId          String
+  share             String   @db.Text
+  submittedAt       DateTime @default(now())
+
+  rotationRequest ShareRotationRequest @relation(fields: [rotationRequestId], references: [id], onDelete: Cascade)
+  holder          User                 @relation("RotationSubmitter", fields: [holderId], references: [id])
+
+  @@unique([rotationRequestId, holderId])
 }

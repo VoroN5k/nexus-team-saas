@@ -1,36 +1,21 @@
 import {
-  Controller,
-  Get,
-  Post,
-  Delete,
-  Body,
-  Param,
-  UseGuards,
-  HttpCode,
-  HttpStatus,
+  Controller, Get, Post, Put, Delete, Body,
+  Param, UseGuards, HttpCode, HttpStatus,
 } from '@nestjs/common';
 import { VaultService } from './vault.service';
 import { VaultGateway } from './vault.gateway';
 import {
-  CreateVaultDto,
-  CreateAccessRequestDto,
-  SubmitShareDto,
+  CreateVaultDto, CreateAccessRequestDto, SubmitShareDto,
+  CreateRotationRequestDto, SubmitRotationShareDto, FinalizeRotationDto,
 } from './dto/vault.dto';
-import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
+import { JwtAuthGuard }         from 'src/auth/guards/jwt-auth.guard';
 import { WorkspaceMemberGuard } from 'src/workspace/guards/workspace-member.guard';
-import { RequireRoles } from 'src/workspace/decorators/require-roles.decorator';
-import { WorkspaceRole } from 'src/workspace/decorators/workspace-role.decorator';
-import { CurrentUser } from 'src/auth/decorators/current-user.decorator';
-import { JWTPayload } from 'src/auth/interfaces/jwt-payload.interface';
-import { Role } from 'src/prisma/prisma.types';
+import { RequireRoles }         from 'src/workspace/decorators/require-roles.decorator';
+import { WorkspaceRole }        from 'src/workspace/decorators/workspace-role.decorator';
+import { CurrentUser }          from 'src/auth/decorators/current-user.decorator';
+import { JWTPayload }           from 'src/auth/interfaces/jwt-payload.interface';
+import { Role }                 from 'src/prisma/prisma.types';
 
-/**
- * Routes: /workspaces/:workspaceId/vault/*
- *
- * All routes require:
- *   1. Valid JWT (JwtAuthGuard)
- *   2. Membership in the workspace (WorkspaceMemberGuard)
- */
 @UseGuards(JwtAuthGuard, WorkspaceMemberGuard)
 @Controller('workspaces/:workspaceId/vault')
 export class VaultController {
@@ -41,14 +26,9 @@ export class VaultController {
 
   // Vault CRUD
 
-  /**
-   * Create a new zero-knowledge vault entry.
-   * Only ADMIN and OWNER can create vaults.
-   * The request body includes encrypted SSS shares — the raw secret is never sent.
-   */
   @RequireRoles(Role.ADMIN)
   @Post()
-  async createVault(
+  createVault(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser() user: JWTPayload,
     @Body() dto: CreateVaultDto,
@@ -56,13 +36,11 @@ export class VaultController {
     return this.vaultService.createVault(workspaceId, user.sub, dto);
   }
 
-  /** List vault metadata for the workspace (no share content returned). */
   @Get()
   listVaults(@Param('workspaceId') workspaceId: string) {
     return this.vaultService.listVaults(workspaceId);
   }
 
-  /** Get a single vault with its holders (no encrypted share content). */
   @Get(':vaultId')
   getVault(
     @Param('workspaceId') workspaceId: string,
@@ -71,7 +49,6 @@ export class VaultController {
     return this.vaultService.getVault(vaultId, workspaceId);
   }
 
-  /** Delete a vault — ADMIN or OWNER only. */
   @RequireRoles(Role.ADMIN)
   @HttpCode(HttpStatus.NO_CONTENT)
   @Delete(':vaultId')
@@ -83,12 +60,22 @@ export class VaultController {
     return this.vaultService.deleteVault(vaultId, workspaceId, role);
   }
 
-  // Encrypted Share 
+  // Holder health check
+
   /**
-   * A key holder fetches their own encrypted SSS share.
-   * They decrypt it client-side using their private key, then use the
-   * plaintext share to fulfil an access request.
+   * Returns last-seen date for each holder so the owner can detect at-risk quorums
+   * before they lose access to the vault permanently.
    */
+  @Get(':vaultId/holder-health')
+  getHolderHealth(
+    @Param('workspaceId') workspaceId: string,
+    @Param('vaultId') vaultId: string,
+  ) {
+    return this.vaultService.getHolderHealth(vaultId, workspaceId);
+  }
+
+  // My encrypted share
+
   @Get(':vaultId/my-share')
   getMyShare(
     @Param('workspaceId') workspaceId: string,
@@ -100,7 +87,6 @@ export class VaultController {
 
   // Access Requests
 
-  /** List all access requests for a vault (most recent first). */
   @Get(':vaultId/access-requests')
   listAccessRequests(
     @Param('workspaceId') workspaceId: string,
@@ -109,7 +95,6 @@ export class VaultController {
     return this.vaultService.listAccessRequests(vaultId, workspaceId);
   }
 
-  /** Get a specific access request with its submission progress. */
   @Get(':vaultId/access-requests/:requestId')
   getAccessRequest(
     @Param('workspaceId') workspaceId: string,
@@ -119,14 +104,6 @@ export class VaultController {
     return this.vaultService.getAccessRequest(requestId, vaultId, workspaceId);
   }
 
-  /**
-   * Create a new access request to unlock a vault.
-   *
-   * Side-effects:
-   *   1. Persists AccessRequest record.
-   *   2. Emits `vault:access_requested` to all workspace members over WebSocket
-   *      so key holders can see and respond to the notification in real time.
-   */
   @Post(':vaultId/access-requests')
   async createAccessRequest(
     @Param('workspaceId') workspaceId: string,
@@ -134,11 +111,8 @@ export class VaultController {
     @CurrentUser() user: JWTPayload,
     @Body() dto: CreateAccessRequestDto,
   ) {
-    const request = await this.vaultService.createAccessRequest(
-      vaultId, workspaceId, user.sub, dto,
-    );
+    const request = await this.vaultService.createAccessRequest(vaultId, workspaceId, user.sub, dto);
 
-    // Notify all connected workspace members via WebSocket
     this.vaultGateway.notifyAccessRequested({
       workspaceId,
       accessRequestId: request.id,
@@ -153,23 +127,11 @@ export class VaultController {
       totalShares:     request.vault.totalShares,
     });
 
-    // Strip holders' detailed info before returning to client
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { holders, ...publicRequest } = request;
     return publicRequest;
   }
 
-  /**
-   * A key holder submits their decrypted SSS share for an access request.
-   *
-   * The plaintext share is stored ephemerally.  The moment the quorum threshold
-   * is reached the service:
-   *   a) marks the request as APPROVED
-   *   b) collects all plaintext shares
-   *   c) deletes them from the DB
-   *
-   * Then this controller emits the shares to the requester's private
-   * WebSocket room — they never persist beyond that emit.
-   */
   @HttpCode(HttpStatus.OK)
   @Post(':vaultId/access-requests/:requestId/submit')
   async submitShare(
@@ -180,14 +142,10 @@ export class VaultController {
     @WorkspaceRole() role: Role,
     @Body() dto: SubmitShareDto,
   ) {
-    const result = await this.vaultService.submitShare(
-      requestId, vaultId, workspaceId, user.sub, dto,
-    );
+    const result = await this.vaultService.submitShare(requestId, vaultId, workspaceId, user.sub, dto);
 
     if (result === null) {
-      // Threshold not yet met — emit progress update
       const request = await this.vaultService.getAccessRequest(requestId, vaultId, workspaceId);
-
       this.vaultGateway.notifyShareSubmitted({
         workspaceId,
         accessRequestId: requestId,
@@ -196,27 +154,13 @@ export class VaultController {
         submittedCount:  request.submissions.length,
         threshold:       request.vault.threshold,
       });
-
-      return {
-        status:         'pending',
-        submittedCount: request.submissions.length,
-        threshold:      request.vault.threshold,
-      };
+      return { status: 'pending', submittedCount: request.submissions.length, threshold: request.vault.threshold };
     }
 
-    // Quorum reached: forward shares to requester via private WS room
     this.vaultGateway.notifyQuorumReached({ ...result, workspaceId });
-
-    return {
-      status:         'approved',
-      submittedCount: result.shares.length,
-    };
+    return { status: 'approved', submittedCount: result.shares.length };
   }
 
-  /**
-   * Deny or cancel a pending access request.
-   * The original requester or an ADMIN/OWNER can cancel.
-   */
   @HttpCode(HttpStatus.NO_CONTENT)
   @Delete(':vaultId/access-requests/:requestId')
   async denyAccessRequest(
@@ -226,10 +170,117 @@ export class VaultController {
     @CurrentUser() user: JWTPayload,
     @WorkspaceRole() role: Role,
   ) {
-    await this.vaultService.denyAccessRequest(
-      requestId, vaultId, workspaceId, user.sub, role,
+    await this.vaultService.denyAccessRequest(requestId, vaultId, workspaceId, user.sub, role);
+    this.vaultGateway.notifyRequestDenied(workspaceId, requestId, vaultId);
+  }
+
+  // Key Rotation
+
+  /** List pending rotation requests for this vault */
+  @Get(':vaultId/rotation-requests')
+  listRotationRequests(
+    @Param('workspaceId') workspaceId: string,
+    @Param('vaultId') vaultId: string,
+  ) {
+    return this.vaultService.listRotationRequests(vaultId, workspaceId);
+  }
+
+  /**
+   * A holder with a new/mismatched key pair requests rotation.
+   * They supply their new public key — other holders will submit shares
+   * so the requester can reconstruct the secret and re-encrypt everything.
+   */
+  @Post(':vaultId/rotation-requests')
+  async createRotationRequest(
+    @Param('workspaceId') workspaceId: string,
+    @Param('vaultId') vaultId: string,
+    @CurrentUser() user: JWTPayload,
+    @Body() dto: CreateRotationRequestDto,
+  ) {
+    const request = await this.vaultService.createRotationRequest(vaultId, workspaceId, user.sub, dto);
+
+    this.vaultGateway.notifyRotationRequested({
+      workspaceId,
+      rotationRequestId: request.id,
+      vaultId:           request.vault.id,
+      vaultName:         request.vault.name,
+      requesterId:       user.sub,
+      requesterName:     `${user.firstName} ${user.lastName}`,
+      holderIds:         request.holders.map((h: any) => h.holderId),
+      expiresAt:         request.expiresAt,
+      threshold:         request.vault.threshold,
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { holders, ...publicRequest } = request;
+    return publicRequest;
+  }
+
+  /**
+   * Another holder submits their plaintext share to contribute to the rotation quorum.
+   * When threshold is reached, the server sends all shares to the requester via WebSocket
+   * so they can reconstruct the secret and re-encrypt everything client-side.
+   */
+  @HttpCode(HttpStatus.OK)
+  @Post(':vaultId/rotation-requests/:rotationRequestId/submit')
+  async submitRotationShare(
+    @Param('workspaceId') workspaceId: string,
+    @Param('vaultId') vaultId: string,
+    @Param('rotationRequestId') rotationRequestId: string,
+    @CurrentUser() user: JWTPayload,
+    @Body() dto: SubmitRotationShareDto,
+  ) {
+    const result = await this.vaultService.submitRotationShare(
+      rotationRequestId, vaultId, workspaceId, user.sub, dto,
     );
 
-    this.vaultGateway.notifyRequestDenied(workspaceId, requestId, vaultId);
+    if (result === null) {
+      const req = await this.vaultService.getRotationRequest(rotationRequestId, vaultId, workspaceId);
+      this.vaultGateway.notifyRotationShareSubmitted({
+        workspaceId,
+        rotationRequestId,
+        vaultId,
+        submittedCount: req.submissions.length,
+        threshold:      req.vault.threshold,
+      });
+      return { status: 'pending', submittedCount: req.submissions.length };
+    }
+
+    this.vaultGateway.notifyRotationQuorumReached({ ...result, workspaceId });
+    return { status: 'quorum_reached' };
+  }
+
+  /**
+   * After the requester has reconstructed the secret and re-split with fresh keys,
+   * they PUT the new encrypted shares. The server replaces all VaultShare records atomically.
+   */
+  @Put(':vaultId/rotation-requests/:rotationRequestId/finalize')
+  async finalizeRotation(
+    @Param('workspaceId') workspaceId: string,
+    @Param('vaultId') vaultId: string,
+    @Param('rotationRequestId') rotationRequestId: string,
+    @CurrentUser() user: JWTPayload,
+    @Body() dto: FinalizeRotationDto,
+  ) {
+    const vault = await this.vaultService.finalizeRotation(
+      rotationRequestId, vaultId, workspaceId, user.sub, dto,
+    );
+
+    this.vaultGateway.notifyRotationFinalized(workspaceId, vaultId, user.sub);
+    return vault;
+  }
+
+  /** Deny or cancel a rotation request */
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Delete(':vaultId/rotation-requests/:rotationRequestId')
+  async denyRotationRequest(
+    @Param('workspaceId') workspaceId: string,
+    @Param('vaultId') vaultId: string,
+    @Param('rotationRequestId') rotationRequestId: string,
+    @CurrentUser() user: JWTPayload,
+    @WorkspaceRole() role: Role,
+  ) {
+    await this.vaultService.denyRotationRequest(rotationRequestId, vaultId, workspaceId, user.sub, role);
+    this.vaultGateway.notifyRotationDenied(workspaceId, rotationRequestId, vaultId);
   }
 }
