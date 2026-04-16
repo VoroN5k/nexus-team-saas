@@ -12,6 +12,8 @@ import {
   UnauthorizedException,
   HttpCode,
   HttpStatus,
+  Put,
+  BadRequestException,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { Throttle } from '@nestjs/throttler';
@@ -156,6 +158,19 @@ export class AuthController {
       ...refreshCookieOptions(this.isProd),
       maxAge: 0,
     });
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Put('me/public-key')
+  async publishPublicKey(
+    @CurrentUser() user: JWTPayload,
+    @Body() body: { publicKey: string },
+  ) {
+    if (!body.publicKey || typeof body.publicKey !== 'string') {
+      throw new BadRequestException('publicKey is required');
+    }
+    await this.authService.publishPublicKey(user.sub, body.publicKey);
   }
 
   private extractMeta(req: Request) {

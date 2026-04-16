@@ -322,6 +322,13 @@ export class AuthService {
       .slice(0, 50);
   }
 
+  async publishPublicKey(userId: string, publicKey: string): Promise<void> {
+    await this.prisma.user.update({
+      where: { id: userId },
+      data:  { publicKey },
+    });
+  }
+
   private async ensureUniqueSlug(base: string, tx: any): Promise<string> {
     let slug = base;
     let attempt = 0;
