@@ -21,28 +21,35 @@ import { Role } from '../../generated/prisma/client';
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
 
-  private readonly MAX_SESSIONS          = 5;
-  private readonly REFRESH_TTL_MS        = 7  * 24 * 60 * 60 * 1_000; // 7 days
-  private readonly VERIFY_TOKEN_TTL_MS   = 24 * 60 * 60 * 1_000;       // 24 h
+  private readonly MAX_SESSIONS = 5;
+  private readonly REFRESH_TTL_MS = 7 * 24 * 60 * 60 * 1_000; // 7 days
+  private readonly VERIFY_TOKEN_TTL_MS = 24 * 60 * 60 * 1_000; // 24 h
 
   // Argon2id production parameters
   private readonly ARGON2_OPTIONS = {
-    type:        argon2.argon2id,
-    memoryCost:  65_536, // 64 MiB
-    timeCost:    3,
+    type: argon2.argon2id,
+    memoryCost: 65_536, // 64 MiB
+    timeCost: 3,
     parallelism: 4,
   } as const;
 
   constructor(
-    private readonly prisma:   PrismaService,
-    private readonly jwt:      JwtService,
-    private readonly email:    EmailService,
+    private readonly prisma: PrismaService,
+    private readonly jwt: JwtService,
+    private readonly email: EmailService,
   ) {}
 
   // Register
 
   async register(dto: RegisterDto, meta: SessionMeta) {
-    const { email, password, confirmPassword, firstName, lastName, organizationName } = dto;
+    const {
+      email,
+      password,
+      confirmPassword,
+      firstName,
+      lastName,
+      organizationName,
+    } = dto;
 
     if (password !== confirmPassword) {
       throw new BadRequestException('Passwords do not match');
@@ -65,14 +72,14 @@ export class AuthService {
           email,
           firstName,
           lastName,
-          password:         hashedPassword,
+          password: hashedPassword,
           emailVerifyToken: hashToken(rawVerifyToken),
         },
       });
 
       // 5. Create workspace and assign user as OWNER
-      const slug      = this.slugify(organizationName);
-      const safeSlug  = await this.ensureUniqueSlug(slug, tx);
+      const slug = this.slugify(organizationName);
+      const safeSlug = await this.ensureUniqueSlug(slug, tx);
 
       const workspace = await tx.workspace.create({
         data: {
@@ -81,7 +88,7 @@ export class AuthService {
           members: {
             create: {
               userId: user.id,
-              role:   Role.OWNER,
+              role: Role.OWNER,
             },
           },
         },
@@ -91,7 +98,9 @@ export class AuthService {
       this.email
         .sendVerificationEmail(email, rawVerifyToken)
         .catch((err) =>
-          this.logger.warn(`Failed to send verification email to ${email}: ${err?.message}`),
+          this.logger.warn(
+            `Failed to send verification email to ${email}: ${err?.message}`,
+          ),
         );
 
       // 7. Issue auth tokens
@@ -105,7 +114,9 @@ export class AuthService {
 
   async login(dto: LoginDto, meta: SessionMeta) {
     // Fetch user — use timing-safe comparison regardless of existence
-    const user = await this.prisma.user.findUnique({ where: { email: dto.email } });
+    const user = await this.prisma.user.findUnique({
+      where: { email: dto.email },
+    });
 
     const passwordValid =
       user !== null && (await argon2.verify(user.password, dto.password));
@@ -118,14 +129,14 @@ export class AuthService {
     return this.issueTokens(user.id, meta, this.prisma);
   }
 
-  // Refresh 
+  // Refresh
 
   async refresh(rawRefreshToken: string, meta: SessionMeta) {
     const hashed = hashToken(rawRefreshToken);
 
     return this.prisma.$transaction(async (tx) => {
       const session = await tx.session.findUnique({
-        where:   { refreshToken: hashed },
+        where: { refreshToken: hashed },
         include: { user: true },
       });
 
@@ -146,7 +157,7 @@ export class AuthService {
     });
   }
 
-  // Logout 
+  // Logout
 
   async logout(rawRefreshToken: string): Promise<void> {
     const hashed = hashToken(rawRefreshToken);
@@ -160,7 +171,7 @@ export class AuthService {
     await this.prisma.session.deleteMany({ where: { userId } });
   }
 
-  // Email Verification 
+  // Email Verification
 
   async verifyEmail(rawToken: string): Promise<{ message: string }> {
     if (!rawToken) throw new BadRequestException('Token is required');
@@ -171,7 +182,8 @@ export class AuthService {
       where: { emailVerifyToken: hashed },
     });
 
-    if (!user) throw new NotFoundException('Invalid or expired verification token');
+    if (!user)
+      throw new NotFoundException('Invalid or expired verification token');
 
     if (user.isEmailVerified) {
       return { message: 'Email already verified' };
@@ -179,7 +191,7 @@ export class AuthService {
 
     await this.prisma.user.update({
       where: { id: user.id },
-      data:  { isEmailVerified: true, emailVerifyToken: null },
+      data: { isEmailVerified: true, emailVerifyToken: null },
     });
 
     return { message: 'Email verified successfully' };
@@ -189,21 +201,23 @@ export class AuthService {
 
   async getUserSessions(userId: string) {
     return this.prisma.session.findMany({
-      where:   { userId },
-      select:  {
-        id:          true,
-        deviceName:  true,
-        userAgent:   true,
-        ipAddress:   true,
-        createdAt:   true,
-        expiresAt:   true,
+      where: { userId },
+      select: {
+        id: true,
+        deviceName: true,
+        userAgent: true,
+        ipAddress: true,
+        createdAt: true,
+        expiresAt: true,
       },
       orderBy: { createdAt: 'desc' },
     });
   }
 
   async revokeSession(userId: string, sessionId: string): Promise<void> {
-    const session = await this.prisma.session.findUnique({ where: { id: sessionId } });
+    const session = await this.prisma.session.findUnique({
+      where: { id: sessionId },
+    });
 
     // Prevent users from revoking someone else's session
     if (!session || session.userId !== userId) {
@@ -215,11 +229,7 @@ export class AuthService {
 
   // Private Helpers
 
-  private async issueTokens(
-    userId: string,
-    meta:   SessionMeta,
-    tx:     any,
-  ) {
+  private async issueTokens(userId: string, meta: SessionMeta, tx: any) {
     const userAgent = meta.userAgent || 'Unknown';
 
     // Reuse existing session for same device to avoid session sprawl
@@ -233,7 +243,7 @@ export class AuthService {
 
     // Enforce max concurrent sessions — evict oldest
     const activeSessions = await tx.session.findMany({
-      where:   { userId },
+      where: { userId },
       orderBy: { createdAt: 'asc' },
     });
 
@@ -241,15 +251,18 @@ export class AuthService {
       await tx.session.delete({ where: { id: activeSessions[0].id } });
     }
 
-    const { accessToken, rawRefreshToken } = await this.generateTokens(userId, tx);
+    const { accessToken, rawRefreshToken } = await this.generateTokens(
+      userId,
+      tx,
+    );
 
     await tx.session.create({
       data: {
         userId,
         refreshToken: hashToken(rawRefreshToken),
         userAgent,
-        ipAddress:   meta.ip ?? 'unknown',
-        expiresAt:   new Date(Date.now() + this.REFRESH_TTL_MS),
+        ipAddress: meta.ip ?? 'unknown',
+        expiresAt: new Date(Date.now() + this.REFRESH_TTL_MS),
       },
     });
 
@@ -258,18 +271,21 @@ export class AuthService {
 
   private async rotateSession(
     sessionId: string,
-    userId:    string,
-    meta:      SessionMeta,
-    tx:        any,
+    userId: string,
+    meta: SessionMeta,
+    tx: any,
   ) {
-    const { accessToken, rawRefreshToken } = await this.generateTokens(userId, tx);
+    const { accessToken, rawRefreshToken } = await this.generateTokens(
+      userId,
+      tx,
+    );
 
     await tx.session.update({
       where: { id: sessionId },
-      data:  {
+      data: {
         refreshToken: hashToken(rawRefreshToken),
-        ipAddress:    meta.ip ?? 'unknown',
-        expiresAt:    new Date(Date.now() + this.REFRESH_TTL_MS),
+        ipAddress: meta.ip ?? 'unknown',
+        expiresAt: new Date(Date.now() + this.REFRESH_TTL_MS),
       },
     });
 
@@ -277,19 +293,19 @@ export class AuthService {
   }
 
   private async generateTokens(userId: string, tx?: any) {
-    const db   = tx ?? this.prisma;
+    const db = tx ?? this.prisma;
     const user = await db.user.findUniqueOrThrow({ where: { id: userId } });
 
     const payload: JWTPayload = {
-      sub:       user.id,
-      email:     user.email,
+      sub: user.id,
+      email: user.email,
       firstName: user.firstName,
-      lastName:  user.lastName,
-      role:      user.role,
+      lastName: user.lastName,
+      role: user.role,
     };
 
     return {
-      accessToken:     this.jwt.sign(payload, { expiresIn: '15m' }),
+      accessToken: this.jwt.sign(payload, { expiresIn: '15m' }),
       rawRefreshToken: generateToken(),
     };
   }
@@ -307,7 +323,7 @@ export class AuthService {
   }
 
   private async ensureUniqueSlug(base: string, tx: any): Promise<string> {
-    let slug    = base;
+    let slug = base;
     let attempt = 0;
 
     while (await tx.workspace.findUnique({ where: { slug } })) {
