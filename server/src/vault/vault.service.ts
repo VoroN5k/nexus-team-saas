@@ -209,5 +209,34 @@ export class VaultService {
     };
   }
 
+  /** Get the current status of an access request, including submission count. */
+  async getAccessRequest(
+    accessRequestId: string,
+    vaultId:         string,
+    workspaceId:     string,
+  ) {
+    await this.getVault(vaultId, workspaceId); // scope check
+ 
+    const request = await this.prisma.accessRequest.findUnique({
+      where:   { id: accessRequestId },
+      include: {
+        vault:       { select: { id: true, name: true, threshold: true, totalShares: true } },
+        requester:   { select: { id: true, firstName: true, lastName: true } },
+        submissions: {
+          select: {
+            holderId:   true,
+            submittedAt: true,
+            holder: { select: { id: true, firstName: true, lastName: true } },
+          },
+        },
+      },
+    });
+ 
+    if (!request || request.vaultId !== vaultId) {
+      throw new NotFoundException('Access request not found');
+    }
+ 
+    return request;
+  }
 
 }
