@@ -23,5 +23,10 @@ export const routes: Routes = [
     canActivate: [authGuard],
     loadComponent: () => import('./features/workspace/workspace.component').then(m => m.WorkspaceComponent),
   },
+  {
+    path: 'join',
+    loadComponent: () =>
+      import('./features/join/join.component').then(m => m.JoinComponent),
+  },
   { path: '**', redirectTo: '/dashboard' },
 ];
