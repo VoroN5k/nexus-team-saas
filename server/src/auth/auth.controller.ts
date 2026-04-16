@@ -142,7 +142,13 @@ export class AuthController {
 
   // Private 
   private setRefreshCookie(res: Response, token: string): void {
-    res.cookie('refreshToken', token, refreshCookieOptions(this.isProd));
+    res.cookie('refreshToken', token, {
+      httpOnly:  true,
+      secure:    this.isProd,
+      sameSite:  'lax',
+      path: '/',
+      maxAge:    refreshCookieOptions(this.isProd).maxAge,
+    });
   }
 
   private clearRefreshCookie(res: Response): void {

@@ -6,6 +6,7 @@ import { AuthModule } from './auth/auth.module';
 import { WorkspaceModule } from './workspace/workspace.module';
 import { TaskModule } from './task/task.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { VaultModule } from './vault/vault.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { PrismaModule } from './prisma/prisma.module';
     AuthModule,
     WorkspaceModule,
     TaskModule,
+    VaultModule
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
