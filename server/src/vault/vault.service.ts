@@ -113,5 +113,20 @@ export class VaultService {
       orderBy: { createdAt: 'desc' },
     });
   }
+
+  async getVault(vaultId: string, workspaceId: string) {
+    const vault = await this.findVaultById(vaultId, workspaceId);
+    return vault;
+  }
+ 
   
+  async deleteVault(vaultId: string, workspaceId: string, requestingRole: Role) {
+    await this.getVault(vaultId, workspaceId); // 404 guard
+ 
+    if (requestingRole === Role.MEMBER) {
+      throw new ForbiddenException('Only ADMIN and OWNER can delete vaults');
+    }
+ 
+    await this.prisma.vault.delete({ where: { id: vaultId } });
+  }
 }
