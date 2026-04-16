@@ -253,4 +253,120 @@ export class VaultService {
     });
   }
 
+   /**
+   * A key holder submits their decrypted SSS share.
+   *
+   * Flow:
+   *   1. Validate the request is still PENDING and not expired.
+   *   2. Confirm the submitter is actually a holder for this vault.
+   *   3. Persist the share submission (upsert — idempotent).
+   *   4. Count submissions — if threshold reached:
+   *        a. Mark request as APPROVED.
+   *        b. Collect all plaintext shares.
+   *        c. Return them so the gateway can forward to the requester.
+   *        d. Purge ShareSubmission rows immediately.
+   *
+   * Returns null if threshold not yet met, or QuorumReachedPayload if it is.
+   */
+
+   async submitShare(
+    accessRequestId: string,
+    vaultId:         string,
+    workspaceId:     string,
+    holderId:        string,
+    dto:             SubmitShareDto,
+  ): Promise<QuorumReachedPayload | null> {
+    // ── Validate vault scope
+    await this.getVault(vaultId, workspaceId);
+ 
+    return this.prisma.$transaction(async (tx) => {
+      // ── Load request with write lock (serialisable)
+      const request = await tx.accessRequest.findUnique({
+        where:   { id: accessRequestId },
+        include: {
+          vault:       true,
+          submissions: true,
+        },
+      });
+ 
+      if (!request || request.vaultId !== vaultId) {
+        throw new NotFoundException('Access request not found');
+      }
+ 
+      if (request.status !== AccessRequestStatus.PENDING) {
+        throw new BadRequestException(
+          `Access request is already ${request.status.toLowerCase()}`,
+        );
+      }
+ 
+      if (request.expiresAt < new Date()) {
+        await tx.accessRequest.update({
+          where: { id: accessRequestId },
+          data:  { status: AccessRequestStatus.EXPIRED },
+        });
+        throw new BadRequestException('Access request has expired');
+      }
+ 
+      // ── Confirm submitter is a designated holder
+      const holderShare = await tx.vaultShare.findUnique({
+        where: { vaultId_holderId: { vaultId, holderId } },
+      });
+ 
+      if (!holderShare) {
+        throw new ForbiddenException('You are not a key holder for this vault');
+      }
+ 
+      // ── Upsert submission (idempotent — holder may re-submit same share)
+      await tx.shareSubmission.upsert({
+        where:  { accessRequestId_holderId: { accessRequestId, holderId } },
+        create: { accessRequestId, holderId, share: dto.share },
+        update: { share: dto.share },
+      });
+ 
+      // ── Recount submissions after upsert
+      const allSubmissions = await tx.shareSubmission.findMany({
+        where: { accessRequestId },
+      });
+ 
+      const submissionCount = allSubmissions.length;
+      const threshold       = request.vault.threshold;
+ 
+      this.logger.log(
+        `Vault ${vaultId} access request ${accessRequestId}: ` +
+        `${submissionCount}/${threshold} shares collected`,
+      );
+ 
+      // ── Threshold not yet met — return null
+      if (submissionCount < threshold) {
+        return null;
+      }
+ 
+      // ── Quorum reached — collect shares and mark APPROVED
+      await tx.accessRequest.update({
+        where: { id: accessRequestId },
+        data:  { status: AccessRequestStatus.APPROVED },
+      });
+ 
+      const sharesPayload = allSubmissions.map(s => ({
+        holderId: s.holderId,
+        share:    s.share,
+      }));
+ 
+      // ── Purge ephemeral share submissions immediately
+      await tx.shareSubmission.deleteMany({ where: { accessRequestId } });
+ 
+      this.logger.log(
+        `Vault ${vaultId}: quorum reached for request ${accessRequestId}. ` +
+        `Shares purged from DB after forwarding.`,
+      );
+ 
+      return {
+        accessRequestId,
+        vaultId,
+        requesterId: request.requesterId,
+        shares:      sharesPayload,
+      };
+    });
+  }
+
 }
