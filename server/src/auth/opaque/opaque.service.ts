@@ -66,4 +66,59 @@ export class OpaqueService implements OnModuleInit {
     });
     return registrationResponse;
   }
+
+  // Login
+
+  /**
+   * Step 1 of OPAQUE login
+   * Returns the server's login response, stores transient serverLoginState under 'nonce'
+   */
+  loginInit(
+    userIdentifier: string,
+    registrationRecord: string,
+    startLoginRequest: string,
+    nonce: string,
+  ): string {
+    const { loginResponse, serverLoginState } = this.mod.server.startLogin({
+      serverSetup:        this.serverSetup,
+      userIdentifier,
+      registrationRecord,
+      startLoginRequest,
+    });
+
+    this.pending.set(nonce, {
+      serverLoginState,
+      expiresAt: Date.now() + 5 * 60_000,
+    });
+
+    return loginResponse;
+  }
+
+  loginFinish(nonce: string, finishLoginRequest: string): void {
+    const pending = this.pending.get(nonce);
+
+    if(!pending) throw new Error('Login session not found (already used of expired)');
+
+    if(pending.expiresAt <= Date.now()) {
+      this.pending.delete(nonce);
+      throw new Error('Login session expired - please restart the login flow')
+    }
+
+    this.pending.delete(nonce);
+
+    this.mod.server.finishLogin({
+      serverLoginState: pending.serverLoginState,
+      finishLoginRequest,
+    });
+  }
+
+  // Private
+
+  private cleanup(): void {
+    const now = Date.now();
+    for (const [k, v] of this.pending) {
+      if (v.expiresAt < now) this.pending.delete(k);
+    }
+  }
+
 }
