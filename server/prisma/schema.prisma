@@ -45,6 +45,10 @@ model User {
   emailVerifyToken String?
   /// RSA-OAEP SPKI public key (base64) — published by client for vault share encryption
   publicKey        String?   @db.Text
+  /// OPAQUE registration record - server stores this instead of plaintext password or hash
+  /// The server CANNOT derive the password from this value.
+  /// Null for legacy users who registered before OPAQUE was introduced.
+  opaqueRecord     String?   @db.Text
   /// Updated on every login / token refresh — used for quorum health checks
   lastSeenAt       DateTime?
   createdAt        DateTime  @default(now())
