@@ -23,6 +23,14 @@ import { LoginDto } from './dto/login.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { JWTPayload } from './interfaces/jwt-payload.interface';
+import { OpaqueService } from 'src/auth/opaque/opaque.service';
+import {
+  OpaqueLoginFinishDto,
+  OpaqueLoginInitDto,
+  OpaqueRegisterFinishDto,
+  OpaqueRegisterInitDto,
+} from 'src/auth/dto/opaque.dto';
+import * as crypto from 'crypto';
 
 // Cookie config helper
 const refreshCookieOptions = (isProd: boolean) => ({
@@ -37,10 +45,110 @@ const refreshCookieOptions = (isProd: boolean) => ({
 export class AuthController {
   private readonly isProd = process.env.NODE_ENV === 'production';
 
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly opaqueService: OpaqueService,
+  ) {}
 
-  // Register
-  // Strict rate limit: 5 registrations per 15 minutes per IP
+  // OPAQUE Registration ( 2 round-trips )
+
+  /**
+   * Round 1: Client sends OPRF request, server responds with OPRF evaluation
+   * No user record is created yet - this is just cryptographic key exchange
+   */
+
+  // Strict rate limit: 10 registrations per 15 minutes per IP
+  @Throttle({ default: { ttl: 900_000, limit: 10 } })
+  @HttpCode(HttpStatus.OK)
+  @Post('opaque/register-init')
+  opaqueRegisterInit(@Body() dto: OpaqueRegisterInitDto) {
+    const registrationResponse = this.opaqueService.registrationResponse(
+      dto.userIdentifier,
+      dto.registrationRequest,
+    );
+    return { registrationResponse };
+  }
+
+  /**
+   * Round 2: Client sends the completed registrationRecord (the OPAQUE envelope)
+   * Server creates the user account. Password is NEVER transmitted or stored
+   */
+
+  @Throttle({ default: { ttl: 900_000, limit: 5 } })
+  @Post('opaque/register-finish')
+  async opaqueRegisterFinish(
+    @Body() dto: OpaqueRegisterFinishDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const meta   = this.extractMeta(req);
+    const result = await this.authService.opaqueRegister(dto, meta);
+    this.setRefreshCookie(res, result.refreshToken);
+    return { accessToken: result.accessToken, workspaceSlug: result.workspaceSlug };
+  }
+
+  // ── OPAQUE Login (2 round-trips) ─────────────────────────────────────────
+
+  /**
+   * Round 1: Client sends OPRF login request
+   * Server responds with its half of the AKE handshake
+   * A short-lived `nonce` ties the two round-trips together (replay protection)
+   */
+
+  // Strict rate limit: 20 attempts per 15 minutes per IP
+  @Throttle({ default: { ttl: 900_000, limit: 20 } })
+  @HttpCode(HttpStatus.OK)
+  @Post('opaque/login-init')
+  async opaqueLoginInit(@Body() dto: OpaqueLoginInitDto) {
+    const user = await this.authService.findUserForOpaque(dto.userIdentifier);
+
+    if (!user?.opaqueRecord) {
+      // Blind error - don't reveal whether the account exists or has OPAQUE configured
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    // Random nonce ties the two round-trips; client echoes it back in login-finish
+    const nonce = crypto.randomBytes(16).toString('hex');
+
+    const loginResponse = this.opaqueService.loginInit(
+      dto.userIdentifier,
+      user.opaqueRecord,
+      dto.startLoginRequest,
+      nonce,
+    );
+
+    return { loginResponse, nonce };
+  }
+
+  /**
+   * Round 2: Client sends the AKE finish message
+   * Server verifies the MAC (proves the client knows the password without seeing it)
+   * On success, issues JWT + refresh token
+   */
+  @Throttle({ default: { ttl: 900_000, limit: 20 } })
+  @HttpCode(HttpStatus.OK)
+  @Post('opaque/login-finish')
+  async opaqueLoginFinish(
+    @Body() dto: OpaqueLoginFinishDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    // Will throw UnauthorizedException if MAC fails
+    try {
+      this.opaqueService.loginFinish(dto.nonce, dto.finishLoginRequest);
+    } catch {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    const meta   = this.extractMeta(req);
+    const tokens = await this.authService.opaqueLogin(dto.userIdentifier, meta);
+
+    this.setRefreshCookie(res, tokens.refreshToken);
+    return { accessToken: tokens.accessToken };
+  }
+
+  // Legacy password endpoints (kept for migration / fallback)
+
   @Throttle({ default: { ttl: 900_000, limit: 5 } })
   @Post('register')
   async register(
@@ -50,16 +158,10 @@ export class AuthController {
   ) {
     const meta   = this.extractMeta(req);
     const result = await this.authService.register(dto, meta);
-
     this.setRefreshCookie(res, result.refreshToken);
-    return {
-      accessToken:   result.accessToken,
-      workspaceSlug: result.workspaceSlug,
-    };
+    return { accessToken: result.accessToken, workspaceSlug: result.workspaceSlug };
   }
 
-  // Login
-  // Strict rate limit: 10 attempts per 15 minutes per IP
   @Throttle({ default: { ttl: 900_000, limit: 10 } })
   @HttpCode(HttpStatus.OK)
   @Post('login')
@@ -70,10 +172,10 @@ export class AuthController {
   ) {
     const meta   = this.extractMeta(req);
     const tokens = await this.authService.login(dto, meta);
-
     this.setRefreshCookie(res, tokens.refreshToken);
     return { accessToken: tokens.accessToken };
   }
+  // ----- END OF LEGACY ENDPOINTS -----
 
   // Refresh
   @Throttle({ default: { ttl: 60_000, limit: 20 } })
