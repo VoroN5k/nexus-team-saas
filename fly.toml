@@ -1,0 +1,41 @@
+# fly.toml — Fly.io deployment config
+# Документація: https://fly.io/docs/reference/configuration/
+app            = 'nexus-team-app'
+primary_region = 'fra'
+
+# ── Build
+[build]
+  dockerfile = 'Dockerfile'
+
+# Environment Variables
+[env]
+  PORT      = '8080'
+  NODE_ENV  = 'production'
+
+# HTTP сервіс
+[http_service]
+  internal_port        = 8080
+  force_https          = true     # редирект HTTP -> HTTPS
+  auto_stop_machines   = true     # зупиняти VM при відсутності трафіку (free tier)
+  auto_start_machines  = true     # запускати при новому запиті
+  min_machines_running = 0        # 0 = повністю безкоштовно (cold start ~2с)
+
+  # WebSocket підтримка - важливо для Socket.io
+  [http_service.concurrency]
+    type       = 'connections'
+    hard_limit = 25
+    soft_limit = 20
+
+# Heath Chevks
+[[http_service.checks]]
+  grace_period = '10s'
+  interval     = '30s'
+  method       = 'GET'
+  path         = '/api/health'
+  timeout      = '5s'
+
+# VM
+[[vm]]
+  memory   = '512mb'    # 256 замало для WASM + NestJS
+  cpu_kind = 'shared'
+  cpus     = 1
