@@ -15,7 +15,7 @@ function apiBase(): string {
   const { protocol, hostname } = window.location;
   if (hostname === 'localhost') return `${protocol}//localhost:4000/api`;
   const apiHost = hostname.replace(/-(\d+)\./, (_: string, p: string) =>
-    p === '3000' ? '-4000.' : `-${p}.`
+    p === '3000' ? '-4000.' : `-${p}.`,
   );
   return `${protocol}//${apiHost}/api`;
 }
@@ -33,24 +33,60 @@ export class AuthService {
 
   constructor(private http: HttpClient, private router: Router) {}
 
+  // Legacy password auth (kept for backward compat)
+
   register(body: {
     email: string; password: string; confirmPassword: string;
     firstName: string; lastName: string; organizationName: string;
   }): Observable<{ accessToken: string; workspaceSlug: string }> {
     return this.http.post<{ accessToken: string; workspaceSlug: string }>(
-      `${API}/register`, body, { withCredentials: true }
+      `${API}/register`, body, { withCredentials: true },
     ).pipe(tap(r => this.saveToken(r.accessToken)));
   }
 
   login(email: string, password: string): Observable<{ accessToken: string }> {
     return this.http.post<{ accessToken: string }>(
-      `${API}/login`, { email, password }, { withCredentials: true }
+      `${API}/login`, { email, password }, { withCredentials: true },
     ).pipe(tap(r => this.saveToken(r.accessToken)));
   }
 
+  // OPAQUE token endpoints
+
+  /**
+   * OPAQUE register-finish: create user account with the OPAQUE record
+   * The access token is returned and saved here; the caller handles VaultKeyService
+   */
+  opaqueRegisterFinish(body: {
+    email: string; registrationRecord: string;
+    firstName: string; lastName: string; organizationName: string;
+  }): Observable<{ accessToken: string; workspaceSlug: string }> {
+    return this.http.post<{ accessToken: string; workspaceSlug: string }>(
+      `${API}/opaque/register-finish`, body, { withCredentials: true },
+    ).pipe(tap(r => this.saveToken(r.accessToken)));
+  }
+
+  /**
+   * OPAQUE login-finish: issues JWT after server verifies the MAC
+   * The access token is returned and saved here; the caller handles VaultKeyService
+   */
+  opaqueLoginFinish(body: {
+    userIdentifier: string; nonce: string; finishLoginRequest: string;
+  }): Observable<{ accessToken: string }> {
+    return this.http.post<{ accessToken: string }>(
+      `${API}/opaque/login-finish`, body, { withCredentials: true },
+    ).pipe(tap(r => this.saveToken(r.accessToken)));
+  }
+
+  /** Upload the user's RSA public key (called after VaultKeyService.initSession) */
+  uploadPublicKey(publicKey: string): Observable<void> {
+    return this.http.put<void>(`${API}/me/public-key`, { publicKey });
+  }
+
+  // Shared
+
   refresh(): Observable<{ accessToken: string }> {
     return this.http.post<{ accessToken: string }>(
-      `${API}/refresh`, {}, { withCredentials: true }
+      `${API}/refresh`, {}, { withCredentials: true },
     ).pipe(tap(r => this.saveToken(r.accessToken)));
   }
 
@@ -78,8 +114,7 @@ export class AuthService {
 
   private parseToken(token: string | null): JWTPayload | null {
     if (!token) return null;
-    try {
-      return JSON.parse(atob(token.split('.')[1])) as JWTPayload;
-    } catch { return null; }
+    try { return JSON.parse(atob(token.split('.')[1])) as JWTPayload; }
+    catch { return null; }
   }
 }
