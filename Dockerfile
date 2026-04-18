@@ -39,7 +39,6 @@ COPY --from=server-builder /build/server/dist ./dist
 COPY --from=server-builder /build/server/generated ./generated
 COPY --from=server-builder /build/server/prisma ./prisma
 
-# Angular build -> served as static files by NestJS ServeStaticModule
 COPY --from=client-builder /build/client/dist/client/browser ./public
 
 # Startup script
