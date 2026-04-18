@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
+import {apiBase} from '../utils/api-base.util';
 
 /**
  * OpaqueClientService - browser-side OPAQUE protocol.
@@ -15,14 +16,6 @@ import { firstValueFrom } from 'rxjs';
  * After registration we immediately run a login to obtain the sessionKey
  */
 
-function apiBase(): string {
-  const { protocol, hostname } = window.location;
-  if (hostname === 'localhost') return `${protocol}//localhost:4000/api`;
-  const apiHost = hostname.replace(/-(\d+)\./, (_: string, p: string) =>
-    p === '3000' ? '-4000.' : `-${p}.`,
-  );
-  return `${protocol}//${apiHost}/api`;
-}
 
 const API = `${apiBase()}/auth`;
 

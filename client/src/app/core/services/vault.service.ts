@@ -2,16 +2,9 @@ import { Injectable, signal, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { AuthService } from './auth.service';
+import {apiBase} from '../utils/api-base.util';
 
 // API base
-
-function apiBase(): string {
-  const { protocol, hostname } = window.location;
-  if (hostname === 'localhost') return `${protocol}//localhost:4000/api`;
-  const apiHost = hostname.replace(/-(\d+)\./, (_: string, p: string) =>
-    p === '3000' ? '-4000.' : `-${p}.`);
-  return `${protocol}//${apiHost}/api`;
-}
 
 function wsBase(): string {
   const { hostname } = window.location;

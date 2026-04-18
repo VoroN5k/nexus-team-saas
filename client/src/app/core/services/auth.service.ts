@@ -3,6 +3,8 @@ import { HttpClient } from '@angular/common/http';
 import { Router } from '@angular/router';
 import { tap } from 'rxjs/operators';
 import { Observable } from 'rxjs';
+import { apiBase } from '../utils/api-base.util';
+
 
 export interface JWTPayload {
   sub: string;
@@ -11,14 +13,6 @@ export interface JWTPayload {
   lastName: string;
 }
 
-function apiBase(): string {
-  const { protocol, hostname } = window.location;
-  if (hostname === 'localhost') return `${protocol}//localhost:4000/api`;
-  const apiHost = hostname.replace(/-(\d+)\./, (_: string, p: string) =>
-    p === '3000' ? '-4000.' : `-${p}.`,
-  );
-  return `${protocol}//${apiHost}/api`;
-}
 
 const API = `${apiBase()}/auth`;
 
