@@ -30,7 +30,12 @@ const API = `${apiBase()}/auth`;
 let opaquePromise: Promise<typeof import('@serenity-kit/opaque')> | null = null;
 
 async function getOpaque() {
-  opaquePromise ??= import('@serenity-kit/opaque');
+  if(!opaquePromise) {
+    opaquePromise = import('@serenity-kit/opaque').then(async mod => {
+      await (mod as any).ready;
+      return mod;
+    });
+  }
   return opaquePromise;
 }
 
