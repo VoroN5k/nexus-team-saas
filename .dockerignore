@@ -1,0 +1,48 @@
+# Dependencies
+**/node_modules
+**/.npm
+
+# Build outputs
+**/dist
+**/.angular
+**/generated
+
+# Environment files (секрети не в образ!)
+**/.env
+**/.env.*
+!**/.env.example
+
+# Version control
+**/.git
+**/.gitignore
+
+# IDE
+**/.vscode
+**/.idea
+**/*.swp
+**/*.swo
+
+# Logs
+**/logs
+**/*.log
+**/npm-debug.log*
+
+# Test artifacts
+**/__tests__
+**/*.spec.ts
+**/*.test.ts
+**/coverage
+
+# Docker files themselves (не рекурсивно)
+Dockerfile*
+docker-compose*
+.dockerignore
+
+# OS
+**/.DS_Store
+**/Thumbs.db
+
+# Документація (не потрібна в образі)
+**/README.md
+**/*.md
+!**/prisma/README.md
