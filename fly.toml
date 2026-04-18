@@ -1,6 +1,6 @@
 # fly.toml — Fly.io deployment config
 # Документація: https://fly.io/docs/reference/configuration/
-app            = 'nexus-team-app'
+app            = 'nexus-team'
 primary_region = 'fra'
 
 # ── Build
