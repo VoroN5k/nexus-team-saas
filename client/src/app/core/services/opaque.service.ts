@@ -5,12 +5,14 @@ import { firstValueFrom } from 'rxjs';
 /**
  * OpaqueClientService - browser-side OPAQUE protocol.
  *
- * Security guarantees:
- * - The plaintext password NEVER leaves this browser
- * - The server only sees OPRF evaluations and the OPAQUE envelope
- * - `exportKey` is a PRF output derived from password + server secrets;
- *   the server cannot compute it - we use it to wrap the vault private key
- * - All opaque binary values are base64 strings (handled by the library)
+ * Key points about @serenity-kit/opaque API:
+ * - `client.finishRegistration` returns `{ registrationRecord }` - no sessionKey
+ * - `client.finishLogin` returns `FinishClientLoginResult | undefined`
+ *    (undefined = wrong password), contains `{ finishLoginRequest, sessionKey }`
+ * - `sessionKey` is a hex string, not Uint8Array
+ *
+ * We use `sessionKey` from the login flow as the vault-key wrapping material
+ * After registration we immediately run a login to obtain the sessionKey
  */
 
 function apiBase(): string {
@@ -24,39 +26,30 @@ function apiBase(): string {
 
 const API = `${apiBase()}/auth`;
 
-// Lazy singleton: WASM module loads once on first use
+// Lazy singleton — WASM loads once
 let opaquePromise: Promise<typeof import('@serenity-kit/opaque')> | null = null;
 
 async function getOpaque() {
-  if (!opaquePromise) {
-    opaquePromise = import('@serenity-kit/opaque').then(async mod => {
-      // Some versions expose a `ready` promise for WASM init
-      if ((mod as any).ready) await (mod as any).ready;
-      return mod;
-    });
-  }
+  opaquePromise ??= import('@serenity-kit/opaque');
   return opaquePromise;
 }
 
+/** sessionKey as hex string - use to derive vault wrapping key via HKDF */
+export type OpaqueSessionKey = string;
+
 export interface OpaqueRegisterResult {
-  /** Send to POST /auth/opaque/register-finish */
   registrationRecord: string;
-  /**
-   * Client-only - NEVER send to server
-   * Deterministic PRF output: use to derive the vault-key wrapping key
-   */
-  exportKey: Uint8Array;
 }
 
 export interface OpaqueLoginResult {
-  /** Send to POST /auth/opaque/login-finish */
   finishLoginRequest: string;
+  nonce: string;
   /**
-   * Client-only - NEVER send to server
-   * Same value as produced during registration (deterministic from password)
-   * Use to unwrap vault private key from IndexedDB
+   * Shared secret derived from password + server OPRF
+   * Server NEVER sees this value (it derives its own copy but doesn't send it)
+   * Use for VaultKeyService.initSession()
    */
-  exportKey: Uint8Array;
+  sessionKey: OpaqueSessionKey;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -66,19 +59,19 @@ export class OpaqueClientService {
   // Registration flow
 
   /**
-   * Full OPAQUE registration:
-   *   1. client.createRegistrationRequest(password)
-   *   2. POST /auth/opaque/register-init -> registrationResponse
-   *   3. client.finalizeRegistration(...)
+   * OPAQUE registration - 2 round-trips:
+   *   1. client.startRegistration(password) -> POST register-init
+   *   2. server.createRegistrationResponse  -> client.finishRegistration
    *
-   * Returns { registrationRecord, exportKey } - caller sends registrationRecord to server
-   * exportKey is kept client-side only
+   * Returns { registrationRecord } to send to server
+   * Note: there is NO sessionKey from registration — call loginOpaque() after
+   * the account is created to obtain the sessionKey for vault key init
    */
   async registerOpaque(email: string, password: string): Promise<OpaqueRegisterResult> {
-    const { client } = await getOpaque();
+    const opaque = await getOpaque();
 
-    const { registrationRequest, clientRegistrationState } =
-      client.startRegistration({ password });
+    const { clientRegistrationState, registrationRequest } =
+      opaque.client.startRegistration({ password });
 
     const { registrationResponse } = await firstValueFrom(
       this.http.post<{ registrationResponse: string }>(`${API}/opaque/register-init`, {
@@ -87,30 +80,33 @@ export class OpaqueClientService {
       }),
     );
 
-    const { registrationRecord, exportKey } = client.finishRegistration({
+    // finishRegistration only returns { registrationRecord } - no sessionKey
+    const { registrationRecord } = opaque.client.finishRegistration({
       clientRegistrationState,
       registrationResponse,
       password,
     });
 
-
-    return { registrationRecord, exportKey };
+    return { registrationRecord };
   }
 
   // Login flow
 
   /**
-   * Round 1 of OPAQUE login - returns the client's AKE message and state
-   * Call this, get `loginResponse` + `nonce` from server, then call `finishLogin`
+   * OPAQUE login - 2 round-trips:
+   *   1. client.startLogin(password) -> POST login-init
+   *   2. server.startLogin           -> client.finishLogin → POST login-finish
+   *
+   * Returns { finishLoginRequest, nonce, sessionKey }
+   * Caller sends finishLoginRequest + nonce to server, keeps sessionKey locally
+   * Throws if password is wrong (finishLogin returns undefined)
    */
-  async startLogin(
-    email:    string,
-    password: string,
-  ): Promise<{ clientLoginState: string; loginResponse: string; nonce: string }> {
-    const { client } = await getOpaque();
+  async loginOpaque(email: string, password: string): Promise<OpaqueLoginResult> {
+    const opaque = await getOpaque();
 
-    const { startLoginRequest, clientLoginState } =
-      client.startLogin({ password });
+    // Round 1
+    const { clientLoginState, startLoginRequest } =
+      opaque.client.startLogin({ password });
 
     const { loginResponse, nonce } = await firstValueFrom(
       this.http.post<{ loginResponse: string; nonce: string }>(`${API}/opaque/login-init`, {
@@ -119,24 +115,19 @@ export class OpaqueClientService {
       }),
     );
 
-    return { clientLoginState, loginResponse, nonce };
-  }
-
-  /**
-   * Round 2 of OPAQUE login - verifies server's message, derives exportKey
-   * Returns `finishLoginRequest` to send to server + `exportKey` for vault keys
-   */
-  async finishLogin(
-    clientLoginState: string,
-    loginResponse:    string,
-  ): Promise<OpaqueLoginResult> {
-    const { client } = await getOpaque();
-
-    const { finishLoginRequest, exportKey } = client.finishLogin({
+    // Round 2 — returns undefined when password is wrong (client-side MAC fails)
+    const loginResult = opaque.client.finishLogin({
       clientLoginState,
       loginResponse,
+      password,
     });
 
-    return { finishLoginRequest, exportKey };
+    if (!loginResult) {
+      // MAC verification failed client-side — password is wrong
+      throw new Error('Invalid credentials');
+    }
+
+    const { finishLoginRequest, sessionKey } = loginResult;
+    return { finishLoginRequest, nonce, sessionKey };
   }
 }
