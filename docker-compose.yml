@@ -1,0 +1,68 @@
+version: '3.9'
+
+# Local development Docker Compos
+#
+# Звичайна розробка (тільки БД у Docker, все інше локально):
+#   docker compose up postgres
+#   cd server && npm run start:dev   (окремий термінал)
+#   cd client && ng serve            (окремий термінал)
+#
+# Повний стек у Docker (тест production-build):
+#   docker compose --profile full up --build
+
+services:
+  # PostgreSQL
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       ${POSTGRES_DB}
+      POSTGRES_USER:     ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:     ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}']
+      interval: 5s
+      timeout:  5s
+      retries:  10
+
+  # pgAdmin (опціонально)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL:    ${PGADMIN_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD}
+    ports:
+      - '5050:80'
+    depends_on:
+      - postgres
+    profiles:
+      - tools
+
+  # Full production-like app
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - '8080:8080'
+    environment:
+      DATABASE_URL:        postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      NODE_ENV:            production
+      PORT:                '8080'
+      JWT_SECRET:          ${JWT_SECRET}
+      OPAQUE_SERVER_SETUP: ${OPAQUE_SERVER_SETUP}
+      ALLOWED_ORIGINS:     ${ALLOWED_ORIGINS}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles:
+      - full
+
+volumes:
+  postgres_data:
