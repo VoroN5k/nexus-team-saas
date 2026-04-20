@@ -5,6 +5,7 @@ import { AuthService } from '../../core/services/auth.service';
 import { WorkspaceService, Workspace, Member } from '../../core/services/workspace.service';
 import { TaskService, Task, TaskStatus } from '../../core/services/task.service';
 import { VaultTabComponent } from './vault-tab.component';
+import { RouterTestingHarness } from '@angular/router/testing';
 
 const STATUS_LABELS: Record<TaskStatus, string> = {
   TODO: 'To Do', IN_PROGRESS: 'In Progress', REVIEW: 'Review', DONE: 'Done',
@@ -379,6 +380,9 @@ export class WorkspaceComponent implements OnInit {
   inviteLinkUrl  = signal('');
   generatingLink = signal(false);
   linkCopied     = signal(false);
+  readonly assignableRoles = ['ADMIN', 'MEMBER'] as const;
+  updatingRoleUserId = signal<string | null>(null);
+  roleUpdateError = signal('');
 
   newTask  = { title: '', description: '', status: 'TODO' as TaskStatus, assignedId: '' };
   editForm = { title: '', description: '', status: 'TODO' as TaskStatus };
@@ -520,6 +524,35 @@ export class WorkspaceComponent implements OnInit {
     if (!confirm('Remove this member?')) return;
     this.wsService.removeMember(this.workspaceId, userId).subscribe({
       next: () => this.members.update(ms => ms.filter(m => m.user.id !== userId)),
+    });
+  }
+
+  changeRole(userId: string, newRole: string) {
+    if (this.updatingRoleUserId()) return;
+
+    const member = this.members().find(m => m.user.id === userId);
+    if (!member || member.role === newRole) return;
+
+    this.roleUpdateError.set('');
+    this.updatingRoleUserId.set(userId);
+
+    this.wsService.updateMemberRole(this.workspaceId, userId, newRole).subscribe({
+      next: () => {
+        this.members.update(ms => 
+          ms.map(m => m.user.id === userId ? { ...m, role: newRole } : m)
+        );
+        this.updatingRoleUserId.set(null);
+      },
+      error: e => {
+        const msg = e?.error?.message;
+        this.roleUpdateError.set(
+          Array.isArray(msg) ? msg.join(', '): (msg ?? 'Failed to update role'),
+        );
+        this.updatingRoleUserId.set(null);
+        this.wsService.getMembers(this.workspaceId).subscribe({
+          next: m => this.members.set(m),
+        });
+      },
     });
   }
 
