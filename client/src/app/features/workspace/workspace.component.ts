@@ -226,6 +226,18 @@ const STATUS_COLORS: Record<TaskStatus, string> = {
       <!-- ── Members Tab ─────────────────────────────────────────────────────── -->
       @if (activeTab() === 'members') {
         <div class="flex-1 p-6 max-w-2xl mx-auto w-full">
+        @if (roleUpdateError()) {
+            <div class="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg
+                        flex items-start gap-3 text-sm">
+              <svg class="w-4 h-4 text-red-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+              </svg>
+              <p class="text-red-400 flex-1">{{ roleUpdateError() }}</p>
+              <button (click)="roleUpdateError.set('')" class="text-slate-400 hover:text-white">✕</button>
+            </div>
+        }
+
           <div class="flex items-center justify-between mb-6">
             <h2 class="text-xl font-bold text-white">Members</h2>
             <div class="flex gap-2">
@@ -319,12 +331,40 @@ const STATUS_COLORS: Record<TaskStatus, string> = {
                             d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/>
                     </svg>
                   </div>
-                  <span class="text-xs px-2 py-1 rounded-full font-medium shrink-0"
-                        [class]="m.role === 'OWNER' ? 'bg-amber-500/20 text-amber-400'
-                             : m.role === 'ADMIN' ? 'bg-blue-500/20 text-blue-400'
-                             : 'bg-slate-700 text-slate-400'">
-                    {{ m.role }}
-                  </span>
+                  @if (canChangeRoleOf(m)) {
+                    <div class="relative shrink-0">
+                      <select
+                        [value]="m.role"
+                        [disabled]="updatingRoleUserId() === m.user.id"
+                        (change)="changeRole(m.user.id, $any($event.target).value)"
+                        class="text-xs font-medium pl-2.5 pr-7 py-1 rounded-full border-0 cursor-pointer
+                              appearance-none focus:outline-none focus:ring-2 focus:ring-indigo-500
+                              disabled:opacity-50"
+                        [class]="m.role === 'ADMIN' ? 'bg-blue-500/20 text-blue-400'
+                                                    : 'bg-slate-700 text-slate-400'">
+                        @for (role of assignableRoles; track role) {
+                          <option [value]="role" class="bg-slate-800 text-white">{{ role }}</option>
+                        }
+                      </select>
+                      @if (updatingRoleUserId() === m.user.id) {
+                        <div class="absolute right-1.5 top-1/2 -translate-y-1/2
+                                    w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin">
+                        </div>
+                      } @else {
+                        <svg class="absolute right-1.5 top-1/2 -translate-y-1/2 w-3 h-3 pointer-events-none opacity-60"
+                            fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                        </svg>
+                      }
+                    </div>
+                  } @else {
+                    <span class="text-xs px-2 py-1 rounded-full font-medium shrink-0"
+                          [class]="m.role === 'OWNER' ? 'bg-amber-500/20 text-amber-400'
+                              : m.role === 'ADMIN' ? 'bg-blue-500/20 text-blue-400'
+                              : 'bg-slate-700 text-slate-400'">
+                      {{ m.role }}
+                    </span>
+                  }
                   @if (myRole() === 'OWNER' && m.role !== 'OWNER') {
                     <button (click)="removeMember(m.user.id)"
                             class="p-1.5 text-slate-500 hover:text-red-400 transition-colors">
@@ -554,6 +594,13 @@ export class WorkspaceComponent implements OnInit {
         });
       },
     });
+  }
+
+  canChangeRoleOf(member: Member): boolean {
+    const myId = this.auth.user()?.sub;
+    return this.myRole() === 'OWNER'
+      && member.role !== 'OWNER'
+      && member.user.id !== myId;
   }
 
   generateInviteLink() {
