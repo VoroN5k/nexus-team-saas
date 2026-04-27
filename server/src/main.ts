@@ -20,16 +20,17 @@ async function bootstrap() {
     helmet({
       contentSecurityPolicy: {
         directives: {
-          defaultSrc:     ["'self'"],
-          scriptSrc:      ["'self'", "'wasm-unsafe-eval'"], // потрібно для OPAQUE WASM
-          styleSrc:       ["'self'", "'unsafe-inline'"],
-          imgSrc:         ["'self'", 'data:', 'https:'],
-          connectSrc:     ["'self'", 'wss:', 'ws:'],       // WebSocket
-          fontSrc:        ["'self'"],
-          objectSrc:      ["'none'"],
-          frameAncestors: ["'none'"],
-          baseUri:        ["'self'"],
-          formAction:     ["'self'"],
+            defaultSrc:     ["'self'"],
+            scriptSrc:      ["'self'", "'unsafe-inline'", "'wasm-unsafe-eval'"],
+            scriptSrcAttr:  ["'unsafe-inline'"],   // для this.media='all' (Angular CSS loader)
+            styleSrc:       ["'self'", "'unsafe-inline'"],
+            imgSrc:         ["'self'", 'data:', 'https:'],
+            connectSrc:     ["'self'", 'wss:', 'ws:'],
+            fontSrc:        ["'self'"],
+            objectSrc:      ["'none'"],
+            frameAncestors: ["'none'"],
+            baseUri:        ["'self'"],
+            formAction:     ["'self'"],
         },
       },
       crossOriginEmbedderPolicy: false, // WASM потребує цього бути вимкненим
