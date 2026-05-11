@@ -1,0 +1,12 @@
+[package]
+name = "nexus-crypto"
+version = "0.1.0"
+edition = "2021"
+description = "Shamir's Secret Sharing implementation for Nexus Team SaaS"
+
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+getrandom = { version = "0.2", features = ["js"] }
+
