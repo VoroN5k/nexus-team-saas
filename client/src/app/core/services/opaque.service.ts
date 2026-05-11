@@ -48,6 +48,8 @@ export interface OpaqueLoginResult {
    * Use for VaultKeyService.initSession()
    */
   sessionKey: OpaqueSessionKey;
+
+  exportKey: string;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -90,30 +92,21 @@ export class OpaqueClientService {
 
   // Login flow
 
-  /**
-   * OPAQUE login - 2 round-trips:
-   *   1. client.startLogin(password) -> POST login-init
-   *   2. server.startLogin           -> client.finishLogin → POST login-finish
-   *
-   * Returns { finishLoginRequest, nonce, sessionKey }
-   * Caller sends finishLoginRequest + nonce to server, keeps sessionKey locally
-   * Throws if password is wrong (finishLogin returns undefined)
-   */
+
   async loginOpaque(email: string, password: string): Promise<OpaqueLoginResult> {
     const opaque = await getOpaque();
 
     // Round 1
-    const { clientLoginState, startLoginRequest } =
-      opaque.client.startLogin({ password });
+    const { clientLoginState, startLoginRequest } = opaque.client.startLogin({ password });
 
     const { loginResponse, nonce } = await firstValueFrom(
-      this.http.post<{ loginResponse: string; nonce: string }>(`${API}/opaque/login-init`, {
-        userIdentifier:    email,
+      this.http.post<{ loginResponse: string, nonce: string }>(`${API}/opaque/login-init`, {
+        userIdentifier: email,
         startLoginRequest,
       }),
     );
 
-    // Round 2 — returns undefined when password is wrong (client-side MAC fails)
+    // Round 2 
     const loginResult = opaque.client.finishLogin({
       clientLoginState,
       loginResponse,
@@ -121,11 +114,11 @@ export class OpaqueClientService {
     });
 
     if (!loginResult) {
-      // MAC verification failed client-side — password is wrong
       throw new Error('Invalid credentials');
     }
 
-    const { finishLoginRequest, sessionKey } = loginResult;
-    return { finishLoginRequest, nonce, sessionKey };
+    const { finishLoginRequest, sessionKey, exportKey } = loginResult;
+    return { finishLoginRequest, sessionKey, nonce, exportKey };
   }
+    
 }
