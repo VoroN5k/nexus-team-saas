@@ -170,17 +170,17 @@ The reconstruction path is symmetric and also entirely client-side.
 
 | Layer | Technology |
 |---|---|
-| Frontend framework | Angular 18 (standalone components, signals API) |
+| Frontend framework | Angular 21 (standalone components, signals API) |
 | Styling | Tailwind CSS v4 |
 | HTTP client | Angular `HttpClient` with functional interceptors |
 | State management | Angular Signals |
 | Real-time | Socket.IO client |
 | Cryptography (client) | Web Crypto API, `@serenity-kit/opaque` (WASM) |
 | Key persistence | IndexedDB |
-| Backend framework | NestJS 10 |
+| Backend framework | NestJS 11 |
 | Language | TypeScript 5 (strict mode) |
-| ORM | Prisma 6 with `@prisma/adapter-pg` |
-| Database | PostgreSQL 15+ |
+| ORM | Prisma 7 with `@prisma/adapter-pg` |
+| Database | PostgreSQL 18+ |
 | Authentication | OPAQUE + JWT (Passport.js) + argon2id (legacy) |
 | WebSockets | Socket.IO with NestJS Gateway |
 | Validation | `class-validator` / `class-transformer` |
